@@ -120,7 +120,7 @@ Everything lives in `~/.agent-link/` on each machine.
 Restart the daemon after changing the config:
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.agent-link.responder
+npm run daemon:restart
 ```
 
 ### `policy.md`
@@ -159,10 +159,26 @@ From the asking side: stop the agent turn in Cursor. The MCP connection drops bu
 From the responding side:
 
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.agent-link.responder.plist
+npm run daemon:stop      # peer goes offline
+npm run daemon:start     # back online
 ```
 
-This stops the daemon (and its in-flight `cursor-agent` run) and takes the peer offline. Askers get `peer_offline` until you `launchctl load` it again.
+`stop` unloads the LaunchAgent, so the daemon and its in-flight `cursor-agent` run terminate. Askers get `peer_offline` until you start it again.
+
+## Daemon control
+
+All wrapped in npm scripts, one per action:
+
+```bash
+npm run daemon:install    # interactive machine setup (setup-machine.sh)
+npm run daemon:start      # load the LaunchAgent (go online)
+npm run daemon:stop       # unload it (go offline)
+npm run daemon:restart    # kickstart, after config or code changes
+npm run daemon:status     # state, pid, last exit code, log tails
+npm run daemon:logs       # follow stdout and stderr (Ctrl+C to exit)
+npm run daemon:rebuild    # git pull + npm install + build + restart
+npm run daemon:uninstall  # unload and remove the plist (config stays)
+```
 
 ## Costs
 

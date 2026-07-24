@@ -13,7 +13,15 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces",
-    "test": "vitest run"
+    "test": "vitest run",
+    "daemon:install": "bash scripts/daemon.sh install",
+    "daemon:start": "bash scripts/daemon.sh start",
+    "daemon:stop": "bash scripts/daemon.sh stop",
+    "daemon:restart": "bash scripts/daemon.sh restart",
+    "daemon:status": "bash scripts/daemon.sh status",
+    "daemon:logs": "bash scripts/daemon.sh logs",
+    "daemon:rebuild": "bash scripts/daemon.sh rebuild",
+    "daemon:uninstall": "bash scripts/daemon.sh uninstall"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

@@ -328,15 +328,16 @@ token. Use the SAME relay URL: $RELAY_URL
 
 ## Daemon control
 
+Run from the repo root ($ROOT):
+
 \`\`\`bash
-# restart after config changes
-launchctl kickstart -k gui/\$(id -u)/com.agent-link.responder
-# stop (go offline, interrupt in-flight work)
-launchctl unload ~/Library/LaunchAgents/com.agent-link.responder.plist
-# start again
-launchctl load ~/Library/LaunchAgents/com.agent-link.responder.plist
-# logs
-tail -f ~/.agent-link/responder.log
+npm run daemon:status
+npm run daemon:logs
+npm run daemon:restart    # after editing config.json or policy.md
+npm run daemon:stop       # peer goes offline
+npm run daemon:start      # peer back online
+npm run daemon:rebuild    # git pull + npm install + build + restart
+npm run daemon:uninstall  # remove the LaunchAgent (keeps ~/.agent-link)
 \`\`\`
 NOTES
 chmod 600 "$NOTES_PATH"
@@ -360,7 +361,12 @@ echo "  $CONFIG_PATH -> \"memory_sources\", \"responder.model\""
 echo "      What the responder reads and which model it answers with."
 echo "  $MCP_PATH"
 echo "      The MCP server entry the asking side uses."
-echo "Restart the daemon after config changes:"
-echo "  launchctl kickstart -k gui/\$(id -u)/com.agent-link.responder"
+echo "Daemon control (from the repo root):"
+echo "  npm run daemon:status     state, pid, last log lines"
+echo "  npm run daemon:logs       follow logs"
+echo "  npm run daemon:restart    after editing config.json or policy.md"
+echo "  npm run daemon:stop       peer goes offline"
+echo "  npm run daemon:start      peer back online"
+echo "  npm run daemon:rebuild    git pull + npm i + build + restart"
 echo
 echo "Saved a copy of these notes to $NOTES_PATH (gitignored)."
