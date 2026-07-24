@@ -129,6 +129,25 @@ describe("Poller", () => {
     expect(sleeps[sleeps.length - 1]).toBe(300_000);
   });
 
+  it("clears backoff timer when aborted mid-wait", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const fetchImpl = vi.fn(async () => {
+        throw new Error("ECONNREFUSED");
+      }) as unknown as typeof fetch;
+      const poller = new Poller(CONFIG, vi.fn(), fetchImpl);
+
+      const pollPromise = poller.pollOnce(controller.signal);
+      await vi.advanceTimersByTimeAsync(0);
+      controller.abort();
+      await expect(pollPromise).resolves.toBe("retry");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("stops run without throwing when an in-flight fetch is aborted", async () => {
     const controller = new AbortController();
     const signals: Array<AbortSignal | null | undefined> = [];

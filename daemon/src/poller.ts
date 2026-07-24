@@ -9,13 +9,16 @@ const AUTH_BACKOFF_CAP_MS = 300_000;
 
 export class Poller {
   private backoffMs = INITIAL_BACKOFF_MS;
+  private readonly injectedSleep?: (ms: number) => Promise<void>;
 
   constructor(
     private config: DaemonConfig,
     private handle: QuestionHandler,
     private fetchImpl: typeof fetch = fetch,
-    private sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
-  ) {}
+    sleep?: (ms: number) => Promise<void>,
+  ) {
+    this.injectedSleep = sleep;
+  }
 
   async pollOnce(signal?: AbortSignal): Promise<"handled" | "empty" | "retry"> {
     const headers = { authorization: `Bearer ${this.config.token}` };
@@ -43,8 +46,9 @@ export class Poller {
       await this.backoff(MAX_BACKOFF_MS, signal);
       return "retry";
     }
-    const question = (await res.json()) as Question;
+    let question: Question | undefined;
     try {
+      question = (await res.json()) as Question;
       const result = await this.handle(question);
       for (let attempt = 1; attempt <= 3; attempt += 1) {
         try {
@@ -73,7 +77,11 @@ export class Poller {
       return "retry";
     } catch {
       if (signal?.aborted) return "retry";
-      console.error(`failed to handle question or deliver answer for ticket ${question.ticket_id}`);
+      if (!question) {
+        console.error("failed to parse inbox response JSON");
+      } else {
+        console.error(`failed to handle question or deliver answer for ticket ${question.ticket_id}`);
+      }
       await this.backoff(MAX_BACKOFF_MS, signal);
       return "retry";
     }
@@ -92,22 +100,48 @@ export class Poller {
   }
 
   private async wait(ms: number, signal?: AbortSignal): Promise<void> {
-    if (!signal) {
-      await this.sleep(ms);
+    if (this.injectedSleep) {
+      if (!signal) {
+        await this.injectedSleep(ms);
+        return;
+      }
+      if (signal.aborted) return;
+
+      let onAbort: (() => void) | undefined;
+      const aborted = new Promise<void>((resolve) => {
+        onAbort = () => resolve();
+        signal.addEventListener("abort", onAbort, { once: true });
+      });
+
+      try {
+        await Promise.race([this.injectedSleep(ms), aborted]);
+      } finally {
+        if (onAbort) signal.removeEventListener("abort", onAbort);
+      }
       return;
     }
-    if (signal.aborted) return;
 
-    let onAbort: (() => void) | undefined;
-    const aborted = new Promise<void>((resolve) => {
-      onAbort = () => resolve();
+    await this.sleepWithTimer(ms, signal);
+  }
+
+  private sleepWithTimer(ms: number, signal?: AbortSignal): Promise<void> {
+    if (!signal) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+    if (signal.aborted) return Promise.resolve();
+
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        resolve();
+      }, ms);
+      const onAbort = () => {
+        clearTimeout(timer);
+        cleanup();
+        resolve();
+      };
+      const cleanup = () => signal.removeEventListener("abort", onAbort);
       signal.addEventListener("abort", onAbort, { once: true });
     });
-
-    try {
-      await Promise.race([this.sleep(ms), aborted]);
-    } finally {
-      if (onAbort) signal.removeEventListener("abort", onAbort);
-    }
   }
 }
