@@ -1,5 +1,5 @@
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 import { loadPeersFromEnv } from "./auth.js";
 import { Mailbox } from "./mailbox.js";
 import { buildMcpServer } from "./mcp.js";
@@ -42,6 +42,16 @@ export function buildApp(env: NodeJS.ProcessEnv = process.env): FastifyInstance 
       }
     }
   });
+
+  // Stateless streamable HTTP does not offer server-initiated SSE or session
+  // teardown. Per MCP spec such endpoints MUST reply with 405 (with Allow),
+  // otherwise clients like Cursor loop on GET/DELETE and mark the session
+  // invalidated.
+  const methodNotAllowed = async (_req: unknown, reply: FastifyReply) => {
+    return reply.code(405).header("allow", "POST").send({ error: "method not allowed" });
+  };
+  app.get("/mcp", methodNotAllowed);
+  app.delete("/mcp", methodNotAllowed);
 
   return app;
 }
