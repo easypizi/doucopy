@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -26,7 +26,9 @@ export async function runTask(
   taskContent: string,
 ): Promise<{ answer?: string; error?: string }> {
   mkdirSync(opts.workspaceDir, { recursive: true });
-  writeFileSync(path.join(opts.workspaceDir, "task.md"), taskContent, { mode: 0o600 });
+  const taskPath = path.join(opts.workspaceDir, "task.md");
+  writeFileSync(taskPath, taskContent, { mode: 0o600 });
+  chmodSync(taskPath, 0o600);
   const args = [
     "--resume", chatId,
     "-p", TASK_INSTRUCTION,

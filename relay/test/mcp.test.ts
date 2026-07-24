@@ -118,8 +118,13 @@ describe("MCP tools", () => {
     const client = await connect(mailbox, "personal", { keepaliveIntervalMs: 20 });
 
     const notifications: unknown[] = [];
+    let gotNotification!: () => void;
+    const notified = new Promise<void>((resolve) => {
+      gotNotification = resolve;
+    });
     client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
       notifications.push(notification);
+      gotNotification();
     });
 
     const asking = client.callTool({
@@ -127,7 +132,12 @@ describe("MCP tools", () => {
       arguments: { peer: "work", question: "hi", timeout_seconds: 5 },
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await Promise.race([
+      notified,
+      new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error("keepalive notification not received within 2s")), 2000),
+      ),
+    ]);
     expect(notifications.length).toBeGreaterThan(0);
 
     const question = await mailbox.takeNext("work", 2000);
