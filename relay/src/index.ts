@@ -18,8 +18,29 @@ export function buildApp(env: NodeJS.ProcessEnv = process.env): FastifyInstance 
     const server = buildMcpServer(mailbox, registry, peer);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     reply.hijack();
-    await server.connect(transport);
-    await transport.handleRequest(req.raw, reply.raw, req.body);
+    reply.raw.on("close", () => {
+      void transport.close();
+      void server.close();
+    });
+    try {
+      await server.connect(transport);
+      await transport.handleRequest(req.raw, reply.raw, req.body);
+    } catch (err) {
+      app.log.error(err);
+      if (!reply.raw.headersSent) {
+        reply.raw.statusCode = 500;
+        reply.raw.setHeader("content-type", "application/json");
+        reply.raw.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            error: { code: -32603, message: "internal server error" },
+            id: null,
+          }),
+        );
+      } else {
+        reply.raw.destroy();
+      }
+    }
   });
 
   return app;
