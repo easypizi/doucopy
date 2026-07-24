@@ -58,7 +58,9 @@ git clone <this-repo> && cd agent-link
 ./scripts/setup-machine.sh
 ```
 
-The script asks for a peer name and relay URL, generates a token, walks you through a privacy wizard (see below), writes `~/.agent-link/config.json` and `~/.agent-link/policy.md`, merges the relay into `~/.cursor/mcp.json`, and installs the responder daemon as a launchd agent.
+The script asks for a peer name and relay URL, generates a token, discovers memory sources (global `~/.cursor/*.md` files and folders containing `AGENTS.md`) and suggests them, walks you through a privacy wizard (see below), writes `~/.agent-link/config.json` and `~/.agent-link/policy.md`, merges the relay into `~/.cursor/mcp.json`, and installs the responder daemon as a launchd agent.
+
+The relay URL is the same for every machine: one relay serves all peers, only the peer name and token differ. The script saves a personalised summary (peer name, token, the exact `heroku config:set` command, tuning map) to `SETUP_NOTES.local.md` in the repo. It contains your token and is gitignored, keep it private.
 
 After each machine's setup, register its token on the relay:
 
