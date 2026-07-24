@@ -19,6 +19,16 @@ describe("ConversationStore", () => {
     expect(reloaded.get("conv-1")).toBe("chat-42");
   });
 
+  it("recovers from corrupted JSON and round-trips after set", () => {
+    const file = tempFile();
+    writeFileSync(file, "not json{{{");
+    const store = new ConversationStore(file);
+    expect(store.get("conv-1")).toBeNull();
+    store.set("conv-1", "chat-42");
+    const reloaded = new ConversationStore(file);
+    expect(reloaded.get("conv-1")).toBe("chat-42");
+  });
+
   it("prunes entries older than 7 days on load", () => {
     const file = tempFile();
     const stale = Date.now() - 8 * 24 * 60 * 60 * 1000;

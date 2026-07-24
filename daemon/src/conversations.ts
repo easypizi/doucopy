@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -12,14 +12,28 @@ export class ConversationStore {
   private entries: Record<string, Entry>;
 
   constructor(private filePath: string) {
-    this.entries = existsSync(filePath)
-      ? (JSON.parse(readFileSync(filePath, "utf8")) as Record<string, Entry>)
-      : {};
-    const now = Date.now();
-    for (const [id, entry] of Object.entries(this.entries)) {
-      if (now - entry.updated_at > MAX_AGE_MS) delete this.entries[id];
+    const fileExisted = existsSync(filePath);
+    if (fileExisted) {
+      try {
+        this.entries = JSON.parse(readFileSync(filePath, "utf8")) as Record<string, Entry>;
+      } catch {
+        console.error("conversations store corrupted, starting fresh");
+        this.entries = {};
+      }
+    } else {
+      this.entries = {};
     }
-    this.save();
+    const now = Date.now();
+    let pruned = false;
+    for (const [id, entry] of Object.entries(this.entries)) {
+      if (now - entry.updated_at > MAX_AGE_MS) {
+        delete this.entries[id];
+        pruned = true;
+      }
+    }
+    if (pruned || !fileExisted) {
+      this.save();
+    }
   }
 
   get(conversationId: string): string | null {
@@ -33,6 +47,8 @@ export class ConversationStore {
 
   private save(): void {
     mkdirSync(path.dirname(this.filePath), { recursive: true });
-    writeFileSync(this.filePath, JSON.stringify(this.entries, null, 2));
+    const tmpPath = `${this.filePath}.tmp`;
+    writeFileSync(tmpPath, JSON.stringify(this.entries, null, 2));
+    renameSync(tmpPath, this.filePath);
   }
 }

@@ -45,4 +45,26 @@ describe("loadConfig", () => {
     writeFileSync(file, JSON.stringify({ ...VALID, token: "" }));
     expect(() => loadConfig(file)).toThrow(/token/);
   });
+
+  it("rejects a config without relay_url", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-"));
+    const file = path.join(dir, "config.json");
+    writeFileSync(file, JSON.stringify({ ...VALID, relay_url: "" }));
+    expect(() => loadConfig(file)).toThrow(/relay_url/);
+  });
+
+  it("rejects a config without self_peer", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-"));
+    const file = path.join(dir, "config.json");
+    writeFileSync(file, JSON.stringify({ ...VALID, self_peer: "" }));
+    expect(() => loadConfig(file)).toThrow(/self_peer/);
+  });
+
+  it("rejects a config without memory_sources", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-"));
+    const file = path.join(dir, "config.json");
+    const { memory_sources: _memorySources, ...rest } = VALID;
+    writeFileSync(file, JSON.stringify(rest));
+    expect(() => loadConfig(file)).toThrow(/memory_sources/);
+  });
 });
