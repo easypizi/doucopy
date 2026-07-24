@@ -2,11 +2,13 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createChat, runTask, type RunnerOptions } from "../src/runner.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.resolve(HERE, "fixtures/fake-cursor-agent.sh");
+const TASK_INSTRUCTION =
+  "Read the file task.md in this workspace and follow the instructions in it.";
 
 function makeOpts(): RunnerOptions & { logFile: string } {
   const dir = mkdtempSync(path.join(tmpdir(), "agent-link-run-"));
@@ -19,14 +21,35 @@ function makeOpts(): RunnerOptions & { logFile: string } {
   };
 }
 
+let savedFakeAgentLog: string | undefined;
+let savedFakeAgentMode: string | undefined;
+
+beforeEach(() => {
+  savedFakeAgentLog = process.env.FAKE_AGENT_LOG;
+  savedFakeAgentMode = process.env.FAKE_AGENT_MODE;
+});
+
 afterEach(() => {
-  delete process.env.FAKE_AGENT_LOG;
-  delete process.env.FAKE_AGENT_MODE;
+  if (savedFakeAgentLog === undefined) {
+    delete process.env.FAKE_AGENT_LOG;
+  } else {
+    process.env.FAKE_AGENT_LOG = savedFakeAgentLog;
+  }
+  if (savedFakeAgentMode === undefined) {
+    delete process.env.FAKE_AGENT_MODE;
+  } else {
+    process.env.FAKE_AGENT_MODE = savedFakeAgentMode;
+  }
 });
 
 describe("createChat", () => {
   it("returns the chat id printed by the binary", async () => {
     await expect(createChat(makeOpts())).resolves.toBe("chat-123");
+  });
+
+  it("rejects when create-chat returns empty output", async () => {
+    process.env.FAKE_AGENT_MODE = "empty";
+    await expect(createChat(makeOpts())).rejects.toThrow(/empty chat id/);
   });
 });
 
@@ -37,13 +60,27 @@ describe("runTask", () => {
     const result = await runTask(opts, "chat-123", "# task body");
     expect(result).toEqual({ answer: "STUB ANSWER" });
     expect(readFileSync(path.join(opts.workspaceDir, "task.md"), "utf8")).toBe("# task body");
-    const args = readFileSync(opts.logFile, "utf8");
-    expect(args).toContain("--resume chat-123");
-    expect(args).toContain("--trust");
-    expect(args).toContain("--force");
-    expect(args).toContain("--output-format text");
-    expect(args).toContain("--model test-model");
-    expect(args).toContain(`--workspace ${opts.workspaceDir}`);
+    const args = readFileSync(opts.logFile, "utf8").trimEnd().split("\n");
+    expect(args).toEqual([
+      "--resume",
+      "chat-123",
+      "-p",
+      TASK_INSTRUCTION,
+      "--output-format",
+      "text",
+      "--trust",
+      "--force",
+      "--workspace",
+      opts.workspaceDir,
+      "--model",
+      "test-model",
+    ]);
+  });
+
+  it("returns empty-output error when the binary prints nothing", async () => {
+    process.env.FAKE_AGENT_MODE = "empty";
+    const result = await runTask(makeOpts(), "chat-123", "# task body");
+    expect(result).toEqual({ error: "responder produced empty output" });
   });
 
   it("returns an error when the binary exits nonzero", async () => {
@@ -51,6 +88,8 @@ describe("runTask", () => {
     process.env.FAKE_AGENT_MODE = "fail";
     const result = await runTask(opts, "chat-123", "# task body");
     expect(result.error).toMatch(/cursor-agent failed/);
+    expect(result.error!.length).toBeLessThanOrEqual("cursor-agent failed: ".length + 500);
+    expect(result).not.toHaveProperty("answer");
   });
 
   it("returns an error when the binary exceeds the timeout", async () => {
