@@ -19,7 +19,8 @@ export function registerRest(app: FastifyInstance, mailbox: Mailbox, registry: P
       if (!peer) return reply.code(401).send({ error: "unauthorized" });
       if (peer !== req.params.peer) return reply.code(403).send({ error: "wrong peer" });
       const requested = Number(req.query.wait ?? MAX_WAIT_SECONDS);
-      const waitSeconds = Math.min(Number.isFinite(requested) ? requested : MAX_WAIT_SECONDS, MAX_WAIT_SECONDS);
+      const parsed = Number.isFinite(requested) ? requested : MAX_WAIT_SECONDS;
+      const waitSeconds = Math.min(Math.max(parsed, 0), MAX_WAIT_SECONDS);
       const question = await mailbox.takeNext(peer, waitSeconds * 1000);
       if (!question) return reply.code(204).send();
       return question;
@@ -33,7 +34,7 @@ export function registerRest(app: FastifyInstance, mailbox: Mailbox, registry: P
       if (!peer) return reply.code(401).send({ error: "unauthorized" });
       const { ticket_id, answer, error } = req.body ?? {};
       if (!ticket_id) return reply.code(400).send({ error: "ticket_id required" });
-      const ok = mailbox.settle(ticket_id, { answer, error });
+      const ok = mailbox.settle(ticket_id, { answer, error }, peer);
       if (!ok) return reply.code(404).send({ error: "unknown_ticket" });
       return { ok: true };
     },

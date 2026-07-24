@@ -24,6 +24,7 @@ describe("REST endpoints", () => {
   it("GET /health responds ok without auth", async () => {
     const res = await ctx.app.inject({ method: "GET", url: "/health" });
     expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
   });
 
   it("rejects inbox access without a valid token", async () => {
@@ -49,6 +50,15 @@ describe("REST endpoints", () => {
     expect(res.statusCode).toBe(204);
   });
 
+  it("clamps a negative inbox wait to zero", async () => {
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/inbox/work?wait=-5",
+      headers: { authorization: "Bearer tok-work" },
+    });
+    expect(res.statusCode).toBe(204);
+  });
+
   it("returns a queued question and accepts the answer", async () => {
     const { ticket_id } = ctx.mailbox.enqueue("work", "personal", "hi");
     const res = await ctx.app.inject({
@@ -67,6 +77,37 @@ describe("REST endpoints", () => {
     });
     expect(answered.statusCode).toBe(200);
     expect(ctx.mailbox.checkReply(ticket_id)).toEqual({ status: "answered", answer: "42" });
+  });
+
+  it("requires ticket_id when answering", async () => {
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/answer",
+      headers: { authorization: "Bearer tok-work" },
+      payload: { answer: "42" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("rejects an answer from the wrong peer without settling the ticket", async () => {
+    const { ticket_id } = ctx.mailbox.enqueue("work", "personal", "hi");
+    const wrongPeer = await ctx.app.inject({
+      method: "POST",
+      url: "/answer",
+      headers: { authorization: "Bearer tok-personal" },
+      payload: { ticket_id, answer: "wrong" },
+    });
+    expect(wrongPeer.statusCode).toBe(404);
+    expect(wrongPeer.json()).toEqual({ error: "unknown_ticket" });
+
+    const rightPeer = await ctx.app.inject({
+      method: "POST",
+      url: "/answer",
+      headers: { authorization: "Bearer tok-work" },
+      payload: { ticket_id, answer: "right" },
+    });
+    expect(rightPeer.statusCode).toBe(200);
+    expect(ctx.mailbox.checkReply(ticket_id)).toEqual({ status: "answered", answer: "right" });
   });
 
   it("returns 404 for an unknown ticket", async () => {

@@ -13,6 +13,7 @@ export type ReplyStatus =
   | { status: "unknown_ticket" };
 
 interface PendingEntry {
+  peer: string;
   deadline: number;
   answer?: string;
   error?: string;
@@ -51,6 +52,7 @@ export class Mailbox {
       deadline: now + QUESTION_TTL_MS,
     };
     this.pending.set(ticket_id, {
+      peer: toPeer,
       deadline: item.deadline,
       settled: false,
       settleListeners: new Set(),
@@ -93,10 +95,11 @@ export class Mailbox {
     });
   }
 
-  settle(ticketId: string, result: { answer?: string; error?: string }): boolean {
+  settle(ticketId: string, result: { answer?: string; error?: string }, answeredBy?: string): boolean {
     this.cleanup();
     const entry = this.pending.get(ticketId);
     if (!entry || entry.settled) return false;
+    if (answeredBy !== undefined && answeredBy !== entry.peer) return false;
     entry.answer = result.answer;
     entry.error = result.error;
     if (entry.answer === undefined && entry.error === undefined) entry.error = "empty answer";
