@@ -1,5 +1,5 @@
 import Fastify from "fastify";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loadPeersFromEnv } from "../src/auth.js";
 import { Mailbox } from "../src/mailbox.js";
 import { registerRest } from "../src/rest.js";
@@ -50,13 +50,29 @@ describe("REST endpoints", () => {
     expect(res.statusCode).toBe(204);
   });
 
-  it("clamps a negative inbox wait to zero", async () => {
-    const res = await ctx.app.inject({
-      method: "GET",
-      url: "/inbox/work?wait=-5",
-      headers: { authorization: "Bearer tok-work" },
-    });
-    expect(res.statusCode).toBe(204);
+  it.each([
+    { wait: "-5", expectedMs: 0 },
+    { wait: "100", expectedMs: 25000 },
+    { wait: "abc", expectedMs: 25000 },
+  ])("clamps inbox wait=$wait to $expectedMs ms for takeNext", async ({ wait, expectedMs }) => {
+    const usingFakeTimers = expectedMs > 0;
+    if (usingFakeTimers) vi.useFakeTimers();
+    try {
+      const takeNextSpy = vi.spyOn(ctx.mailbox, "takeNext");
+      const resPromise = ctx.app.inject({
+        method: "GET",
+        url: `/inbox/work?wait=${wait}`,
+        headers: { authorization: "Bearer tok-work" },
+      });
+      if (usingFakeTimers) await vi.advanceTimersByTimeAsync(expectedMs);
+      const res = await resPromise;
+      expect(res.statusCode).toBe(204);
+      expect(takeNextSpy).toHaveBeenCalledOnce();
+      expect(takeNextSpy).toHaveBeenCalledWith("work", expectedMs);
+      takeNextSpy.mockRestore();
+    } finally {
+      if (usingFakeTimers) vi.useRealTimers();
+    }
   });
 
   it("returns a queued question and accepts the answer", async () => {
@@ -77,6 +93,15 @@ describe("REST endpoints", () => {
     });
     expect(answered.statusCode).toBe(200);
     expect(ctx.mailbox.checkReply(ticket_id)).toEqual({ status: "answered", answer: "42" });
+  });
+
+  it("rejects answer without a valid token", async () => {
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/answer",
+      payload: { ticket_id: "x", answer: "42" },
+    });
+    expect(res.statusCode).toBe(401);
   });
 
   it("requires ticket_id when answering", async () => {
