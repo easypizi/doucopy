@@ -2,6 +2,7 @@ import { v7 as uuidv7 } from "uuid";
 import type { Question } from "./types.js";
 
 const QUESTION_TTL_MS = 24 * 60 * 60 * 1000;
+const RETENTION_MS = QUESTION_TTL_MS;
 const INBOX_LIMIT = 100;
 const ONLINE_WINDOW_MS = 60_000;
 
@@ -16,7 +17,7 @@ interface PendingEntry {
   answer?: string;
   error?: string;
   settled: boolean;
-  onSettle?: () => void;
+  settleListeners: Set<() => void>;
 }
 
 interface Waiter {
@@ -29,6 +30,7 @@ export class Mailbox {
   private pending = new Map<string, PendingEntry>();
   private waiters = new Map<string, Waiter[]>();
   private lastSeen = new Map<string, number>();
+  private cleaning = false;
 
   enqueue(
     toPeer: string,
@@ -48,7 +50,11 @@ export class Mailbox {
       created_at: now,
       deadline: now + QUESTION_TTL_MS,
     };
-    this.pending.set(ticket_id, { deadline: item.deadline, settled: false });
+    this.pending.set(ticket_id, {
+      deadline: item.deadline,
+      settled: false,
+      settleListeners: new Set(),
+    });
 
     const waiter = this.waiters.get(toPeer)?.shift();
     if (waiter) {
@@ -88,33 +94,39 @@ export class Mailbox {
   }
 
   settle(ticketId: string, result: { answer?: string; error?: string }): boolean {
+    this.cleanup();
     const entry = this.pending.get(ticketId);
     if (!entry || entry.settled) return false;
     entry.answer = result.answer;
     entry.error = result.error;
     if (entry.answer === undefined && entry.error === undefined) entry.error = "empty answer";
     entry.settled = true;
-    entry.onSettle?.();
+    entry.deadline = Date.now() + RETENTION_MS;
+    for (const listener of [...entry.settleListeners]) listener();
     return true;
   }
 
   waitForAnswer(ticketId: string, timeoutMs: number): Promise<ReplyStatus> {
+    this.cleanup();
     const entry = this.pending.get(ticketId);
     if (!entry) return Promise.resolve({ status: "unknown_ticket" });
     if (entry.settled) return Promise.resolve(this.consume(ticketId, entry));
     return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        entry.onSettle = undefined;
-        resolve({ status: "pending" });
-      }, timeoutMs);
-      entry.onSettle = () => {
+      const listener = () => {
         clearTimeout(timer);
+        entry.settleListeners.delete(listener);
         resolve(this.consume(ticketId, entry));
       };
+      const timer = setTimeout(() => {
+        entry.settleListeners.delete(listener);
+        resolve({ status: "pending" });
+      }, timeoutMs);
+      entry.settleListeners.add(listener);
     });
   }
 
   checkReply(ticketId: string): ReplyStatus {
+    this.cleanup();
     const entry = this.pending.get(ticketId);
     if (!entry) return { status: "unknown_ticket" };
     if (!entry.settled) return { status: "pending" };
@@ -134,15 +146,22 @@ export class Mailbox {
   }
 
   private cleanup(): void {
+    if (this.cleaning) return;
+    this.cleaning = true;
     const now = Date.now();
-    for (const [peer, queue] of this.inbox) {
-      const expired = queue.filter((q) => q.deadline <= now);
-      this.inbox.set(peer, queue.filter((q) => q.deadline > now));
-      for (const q of expired) this.settle(q.ticket_id, { error: "expired" });
-    }
-    for (const [id, entry] of this.pending) {
-      if (entry.deadline > now) continue;
-      if (!entry.settled) this.settle(id, { error: "expired" });
+    try {
+      for (const [peer, queue] of this.inbox) {
+        const expired = queue.filter((q) => q.deadline <= now);
+        this.inbox.set(peer, queue.filter((q) => q.deadline > now));
+        for (const q of expired) this.settle(q.ticket_id, { error: "expired" });
+      }
+      for (const [id, entry] of this.pending) {
+        if (entry.deadline > now) continue;
+        if (entry.settled) this.pending.delete(id);
+        else this.settle(id, { error: "expired" });
+      }
+    } finally {
+      this.cleaning = false;
     }
   }
 }

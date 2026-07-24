@@ -43,6 +43,19 @@ describe("Mailbox", () => {
     await expect(waiting).resolves.toEqual({ status: "answered", answer: "42" });
   });
 
+  it("resolves concurrent waitForAnswer calls with the same answer", async () => {
+    const box = new Mailbox();
+    const { ticket_id } = box.enqueue("work", "personal", "hi");
+    const first = box.waitForAnswer(ticket_id, 10_000);
+    const second = box.waitForAnswer(ticket_id, 10_000);
+    expect(box.settle(ticket_id, { answer: "42" })).toBe(true);
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { status: "answered", answer: "42" },
+      { status: "answered", answer: "42" },
+    ]);
+    expect(box.checkReply(ticket_id)).toEqual({ status: "unknown_ticket" });
+  });
+
   it("returns pending on waitForAnswer timeout, then answered via checkReply", async () => {
     const box = new Mailbox();
     const { ticket_id } = box.enqueue("work", "personal", "hi");
@@ -76,6 +89,22 @@ describe("Mailbox", () => {
     const q = await box.takeNext("work", 100);
     expect(q?.question).toBe("trigger cleanup");
     expect(box.checkReply(ticket_id)).toEqual({ status: "error", error: "expired" });
+  });
+
+  it("expires a question when checkReply is the next operation", () => {
+    const box = new Mailbox();
+    const { ticket_id } = box.enqueue("work", "personal", "hi");
+    vi.advanceTimersByTime(24 * 60 * 60 * 1000 + 1);
+    expect(box.checkReply(ticket_id)).toEqual({ status: "error", error: "expired" });
+  });
+
+  it("deletes an unconsumed settled entry after its retention window", () => {
+    const box = new Mailbox();
+    const { ticket_id } = box.enqueue("work", "personal", "hi");
+    expect(box.settle(ticket_id, { answer: "42" })).toBe(true);
+    vi.advanceTimersByTime(24 * 60 * 60 * 1000 + 1);
+    box.enqueue("work", "personal", "trigger cleanup");
+    expect(box.checkReply(ticket_id)).toEqual({ status: "unknown_ticket" });
   });
 
   it("tracks presence from takeNext with a 60 second window", async () => {
