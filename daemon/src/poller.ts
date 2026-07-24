@@ -17,21 +17,22 @@ export class Poller {
     private sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
   ) {}
 
-  async pollOnce(): Promise<"handled" | "empty" | "retry"> {
+  async pollOnce(signal?: AbortSignal): Promise<"handled" | "empty" | "retry"> {
     const headers = { authorization: `Bearer ${this.config.token}` };
     let res: Response;
     try {
       res = await this.fetchImpl(
         `${this.config.relay_url}/inbox/${this.config.self_peer}?wait=25`,
-        { headers },
+        { headers, signal },
       );
     } catch {
-      await this.backoff(MAX_BACKOFF_MS);
+      if (signal?.aborted) return "retry";
+      await this.backoff(MAX_BACKOFF_MS, signal);
       return "retry";
     }
     if (res.status === 401 || res.status === 403) {
       console.error(`relay rejected the token (HTTP ${res.status}), check config`);
-      await this.backoff(AUTH_BACKOFF_CAP_MS);
+      await this.backoff(AUTH_BACKOFF_CAP_MS, signal);
       return "retry";
     }
     if (res.status === 204) {
@@ -39,28 +40,74 @@ export class Poller {
       return "empty";
     }
     if (!res.ok) {
-      await this.backoff(MAX_BACKOFF_MS);
+      await this.backoff(MAX_BACKOFF_MS, signal);
       return "retry";
     }
-    this.backoffMs = INITIAL_BACKOFF_MS;
     const question = (await res.json()) as Question;
-    const result = await this.handle(question);
-    await this.fetchImpl(`${this.config.relay_url}/answer`, {
-      method: "POST",
-      headers: { ...headers, "content-type": "application/json" },
-      body: JSON.stringify({ ticket_id: question.ticket_id, ...result }),
-    });
-    return "handled";
+    try {
+      const result = await this.handle(question);
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+          const answerRes = await this.fetchImpl(`${this.config.relay_url}/answer`, {
+            method: "POST",
+            headers: { ...headers, "content-type": "application/json" },
+            body: JSON.stringify({ ticket_id: question.ticket_id, ...result }),
+            signal,
+          });
+          if (answerRes.ok) {
+            this.backoffMs = INITIAL_BACKOFF_MS;
+            return "handled";
+          }
+        } catch {
+          if (signal?.aborted) return "retry";
+        }
+
+        if (attempt < 3) {
+          await this.wait(1000, signal);
+          if (signal?.aborted) return "retry";
+        }
+      }
+
+      console.error(`failed to deliver answer for ticket ${question.ticket_id}`);
+      await this.backoff(MAX_BACKOFF_MS, signal);
+      return "retry";
+    } catch {
+      if (signal?.aborted) return "retry";
+      console.error(`failed to handle question or deliver answer for ticket ${question.ticket_id}`);
+      await this.backoff(MAX_BACKOFF_MS, signal);
+      return "retry";
+    }
   }
 
   async run(signal?: AbortSignal): Promise<void> {
     while (!signal?.aborted) {
-      await this.pollOnce();
+      await this.pollOnce(signal);
     }
   }
 
-  private async backoff(capMs: number): Promise<void> {
-    await this.sleep(Math.min(this.backoffMs, capMs));
+  private async backoff(capMs: number, signal?: AbortSignal): Promise<void> {
+    await this.wait(Math.min(this.backoffMs, capMs), signal);
+    if (signal?.aborted) return;
     this.backoffMs = Math.min(this.backoffMs * 2, capMs);
+  }
+
+  private async wait(ms: number, signal?: AbortSignal): Promise<void> {
+    if (!signal) {
+      await this.sleep(ms);
+      return;
+    }
+    if (signal.aborted) return;
+
+    let onAbort: (() => void) | undefined;
+    const aborted = new Promise<void>((resolve) => {
+      onAbort = () => resolve();
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+
+    try {
+      await Promise.race([this.sleep(ms), aborted]);
+    } finally {
+      if (onAbort) signal.removeEventListener("abort", onAbort);
+    }
   }
 }

@@ -45,6 +45,44 @@ describe("Poller", () => {
     expect(JSON.parse(String(calls[1].init?.body))).toEqual({ ticket_id: "t-1", answer: "42" });
   });
 
+  it("returns retry when the handler throws", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(QUESTION), { status: 200 })) as unknown as typeof fetch;
+    const handle = vi.fn(async () => {
+      throw new Error("handler failed");
+    });
+    const poller = new Poller(CONFIG, handle, fetchImpl, async () => undefined);
+
+    await expect(poller.pollOnce()).resolves.toBe("retry");
+  });
+
+  it("returns retry after three failed answer deliveries", async () => {
+    const fetchImpl = vi.fn(async (url: string | URL) => {
+      if (String(url).includes("/inbox/")) {
+        return new Response(JSON.stringify(QUESTION), { status: 200 });
+      }
+      return new Response(null, { status: 500 });
+    }) as unknown as typeof fetch;
+    const poller = new Poller(CONFIG, vi.fn(async () => ({ answer: "42" })), fetchImpl, async () => undefined);
+
+    await expect(poller.pollOnce()).resolves.toBe("retry");
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
+  });
+
+  it("handles a question when answer delivery succeeds on the third attempt", async () => {
+    let postAttempts = 0;
+    const fetchImpl = vi.fn(async (url: string | URL) => {
+      if (String(url).includes("/inbox/")) {
+        return new Response(JSON.stringify(QUESTION), { status: 200 });
+      }
+      postAttempts += 1;
+      return new Response(null, { status: postAttempts < 3 ? 500 : 200 });
+    }) as unknown as typeof fetch;
+    const poller = new Poller(CONFIG, vi.fn(async () => ({ answer: "42" })), fetchImpl, async () => undefined);
+
+    await expect(poller.pollOnce()).resolves.toBe("handled");
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
+  });
+
   it("returns empty on 204 without calling the handler", async () => {
     const fetchImpl = vi.fn(async () => new Response(null, { status: 204 })) as unknown as typeof fetch;
     const handle = vi.fn();
@@ -67,6 +105,20 @@ describe("Poller", () => {
     expect(sleeps).toEqual([1000, 2000, 4000]);
   });
 
+  it("backs off exponentially on inbox server errors", async () => {
+    const sleeps: number[] = [];
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 500 })) as unknown as typeof fetch;
+    const poller = new Poller(CONFIG, vi.fn(), fetchImpl, async (ms) => {
+      sleeps.push(ms);
+    });
+
+    await poller.pollOnce();
+    await poller.pollOnce();
+    await poller.pollOnce();
+
+    expect(sleeps).toEqual([1000, 2000, 4000]);
+  });
+
   it("uses a long backoff on 401", async () => {
     const sleeps: number[] = [];
     const fetchImpl = vi.fn(async () => new Response(null, { status: 401 })) as unknown as typeof fetch;
@@ -75,5 +127,28 @@ describe("Poller", () => {
     });
     for (let i = 0; i < 10; i++) await poller.pollOnce();
     expect(sleeps[sleeps.length - 1]).toBe(300_000);
+  });
+
+  it("stops run without throwing when an in-flight fetch is aborted", async () => {
+    const controller = new AbortController();
+    const signals: Array<AbortSignal | null | undefined> = [];
+    const fetchImpl = vi.fn((_url: string | URL, init?: RequestInit) => {
+      signals.push(init?.signal);
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) {
+          reject(new Error("missing abort signal"));
+          return;
+        }
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    }) as unknown as typeof fetch;
+    const poller = new Poller(CONFIG, vi.fn(), fetchImpl, async () => undefined);
+
+    const runPromise = poller.run(controller.signal);
+    controller.abort(new Error("stopped"));
+
+    await expect(runPromise).resolves.toBeUndefined();
+    expect(signals).toEqual([controller.signal]);
   });
 });
