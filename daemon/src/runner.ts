@@ -1,10 +1,11 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const TASK_INSTRUCTION = "Read the file task.md in this workspace and follow the instructions in it.";
+const CREATE_CHAT_TIMEOUT_MS = 30_000;
 
 export interface RunnerOptions {
   binary: string;
@@ -13,11 +14,45 @@ export interface RunnerOptions {
   model?: string;
 }
 
+// Some cursor-agent builds (>=2026.07) print the new chat id to stdout and then
+// keep the process alive, so execFile hangs until the outer timeout. Read the
+// first line ourselves and terminate the child once we have the id.
 export async function createChat(opts: RunnerOptions): Promise<string> {
-  const { stdout } = await execFileAsync(opts.binary, ["create-chat"], { timeout: 60_000 });
-  const chatId = stdout.trim();
-  if (!chatId) throw new Error("create-chat returned an empty chat id");
-  return chatId;
+  return new Promise<string>((resolve, reject) => {
+    const proc = spawn(opts.binary, ["create-chat"], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let buffer = "";
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (!proc.killed) proc.kill();
+      fn();
+    };
+    const timer = setTimeout(() => {
+      finish(() => reject(new Error("create-chat timed out")));
+    }, CREATE_CHAT_TIMEOUT_MS);
+    proc.stdout.on("data", (chunk: Buffer) => {
+      buffer += chunk.toString("utf8");
+      const nl = buffer.indexOf("\n");
+      if (nl < 0) return;
+      const chatId = buffer.slice(0, nl).trim();
+      finish(() => {
+        if (chatId) resolve(chatId);
+        else reject(new Error("create-chat returned an empty chat id"));
+      });
+    });
+    proc.on("error", (err) => finish(() => reject(err)));
+    proc.on("close", () => {
+      const chatId = buffer.split("\n")[0]?.trim() ?? "";
+      finish(() => {
+        if (chatId) resolve(chatId);
+        else reject(new Error("create-chat returned an empty chat id"));
+      });
+    });
+  });
 }
 
 export async function runTask(

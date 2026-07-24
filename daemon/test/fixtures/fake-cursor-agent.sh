@@ -7,7 +7,13 @@ if [ "${FAKE_AGENT_MODE:-ok}" = "empty" ]; then
   exit 0
 fi
 if [ "$1" = "create-chat" ]; then
+  if [ "${FAKE_AGENT_MODE:-ok}" = "empty" ]; then
+    exit 0
+  fi
   echo "chat-123"
+  if [ "${FAKE_AGENT_MODE:-ok}" = "create-chat-hang" ]; then
+    sleep 30
+  fi
   exit 0
 fi
 if [ "${FAKE_AGENT_MODE:-ok}" = "fail" ]; then

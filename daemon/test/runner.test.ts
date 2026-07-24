@@ -51,6 +51,13 @@ describe("createChat", () => {
     process.env.FAKE_AGENT_MODE = "empty";
     await expect(createChat(makeOpts())).rejects.toThrow(/empty chat id/);
   });
+
+  it("returns the chat id and kills the process when create-chat prints then hangs", async () => {
+    process.env.FAKE_AGENT_MODE = "create-chat-hang";
+    const started = Date.now();
+    await expect(createChat(makeOpts())).resolves.toBe("chat-123");
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
 });
 
 describe("runTask", () => {
