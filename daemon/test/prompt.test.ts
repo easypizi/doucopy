@@ -16,6 +16,18 @@ describe("buildFirstTask", () => {
     expect(task).toContain("AGENTS.md");
     expect(task).toContain("Do not invent facts");
   });
+
+  it("includes extra files when memory map has them", () => {
+    const memory = { ...MEMORY, extra_files: ["/home/u/notes.md"] };
+    const task = buildFirstTask("Do not share secrets.", "What did I ship?", memory);
+    expect(task).toContain("Extra files:");
+    expect(task).toContain("/home/u/notes.md");
+  });
+
+  it("uses default policy text when policy is empty", () => {
+    const task = buildFirstTask("", "What did I ship?", MEMORY);
+    expect(task).toContain("No extra restrictions.");
+  });
 });
 
 describe("buildFollowupTask", () => {
@@ -24,5 +36,13 @@ describe("buildFollowupTask", () => {
     expect(task).toContain("Do not share secrets.");
     expect(task).toContain("Which of those shipped?");
     expect(task).not.toContain("jsonl");
+    expect(task).not.toContain("Memory sources");
+    expect(task).not.toContain("Chat transcripts");
+    expect(task).not.toContain("Accumulated memory");
+  });
+
+  it("uses default policy text when policy is empty", () => {
+    const task = buildFollowupTask("", "Which of those shipped?");
+    expect(task).toContain("No extra restrictions.");
   });
 });
