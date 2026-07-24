@@ -1,0 +1,88 @@
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import type { PeerRegistry } from "./auth.js";
+import type { Mailbox } from "./mailbox.js";
+
+const KEEPALIVE_INTERVAL_MS = 15_000;
+const DEFAULT_TIMEOUT_S = 120;
+const MAX_TIMEOUT_S = 240;
+
+function json(data: unknown) {
+  return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
+}
+
+export function buildMcpServer(mailbox: Mailbox, registry: PeerRegistry, fromPeer: string): McpServer {
+  const server = new McpServer({ name: "agent-link", version: "0.1.0" });
+
+  server.registerTool(
+    "list_peers",
+    {
+      description: "List peers you can ask and whether their responder daemon is online.",
+      inputSchema: {},
+    },
+    async () =>
+      json(
+        registry
+          .peers()
+          .filter((name) => name !== fromPeer)
+          .map((name) => ({ name, online: mailbox.isOnline(name) })),
+      ),
+  );
+
+  server.registerTool(
+    "ask_peer",
+    {
+      description:
+        "Ask another account's agent a question. It answers from its own memory (chat history, notes). " +
+        "Pass conversation_id from a previous result to continue the same conversation. " +
+        "If status is pending or peer_offline, fetch the answer later with check_reply.",
+      inputSchema: {
+        peer: z.string().describe("Peer name from list_peers"),
+        question: z.string(),
+        timeout_seconds: z.number().int().positive().optional(),
+        conversation_id: z.string().optional(),
+      },
+    },
+    async ({ peer, question, timeout_seconds, conversation_id }, extra) => {
+      if (peer === fromPeer || !registry.peers().includes(peer)) {
+        return json({ status: "error", error: `unknown peer: ${peer}` });
+      }
+      const { ticket_id, conversation_id: convId } = mailbox.enqueue(
+        peer,
+        fromPeer,
+        question,
+        conversation_id,
+      );
+      if (!mailbox.isOnline(peer)) {
+        return json({ status: "peer_offline", ticket_id, conversation_id: convId });
+      }
+      const timeoutMs = Math.min(timeout_seconds ?? DEFAULT_TIMEOUT_S, MAX_TIMEOUT_S) * 1000;
+      // Heroku's router kills silent connections after 30s, so ping the SSE stream while waiting.
+      const keepalive = setInterval(() => {
+        void extra
+          .sendNotification({
+            method: "notifications/message",
+            params: { level: "info", data: "waiting for peer answer" },
+          })
+          .catch(() => undefined);
+      }, KEEPALIVE_INTERVAL_MS);
+      try {
+        const result = await mailbox.waitForAnswer(ticket_id, timeoutMs);
+        return json({ ...result, ticket_id, conversation_id: convId });
+      } finally {
+        clearInterval(keepalive);
+      }
+    },
+  );
+
+  server.registerTool(
+    "check_reply",
+    {
+      description: "Fetch a delayed answer using the ticket_id returned earlier by ask_peer.",
+      inputSchema: { ticket_id: z.string() },
+    },
+    async ({ ticket_id }) => json({ ...mailbox.checkReply(ticket_id), ticket_id }),
+  );
+
+  return server;
+}
