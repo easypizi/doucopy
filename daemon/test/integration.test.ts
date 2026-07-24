@@ -14,12 +14,32 @@ import { Poller } from "../src/poller.js";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.resolve(HERE, "fixtures/fake-cursor-agent.sh");
 
+function toolPayload(result: Awaited<ReturnType<Client["callTool"]>>): Record<string, unknown> {
+  const content = result.content as Array<{ type: string; text: string }>;
+  return JSON.parse(content[0].text) as Record<string, unknown>;
+}
+
+async function waitForPeerOnline(client: Client, peerName: string, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const result = await client.callTool({ name: "list_peers", arguments: {} });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const peers = JSON.parse(content[0].text) as Array<{ name: string; online: boolean }>;
+    if (peers.some((peer) => peer.name === peerName && peer.online)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Peer "${peerName}" did not come online within ${timeoutMs}ms`);
+}
+
 describe("full cycle: MCP ask_peer -> daemon -> answer", () => {
   const app = buildApp({
     PEER_TOKEN_PERSONAL: "tok-personal",
     PEER_TOKEN_WORK: "tok-work",
   } as NodeJS.ProcessEnv);
   let baseUrl: string;
+  let pollerRunPromise: Promise<void>;
   const abort = new AbortController();
 
   beforeAll(async () => {
@@ -46,13 +66,12 @@ describe("full cycle: MCP ask_peer -> daemon -> answer", () => {
     };
     const store = new ConversationStore(path.join(dir, "conversations.json"));
     const poller = new Poller(config, createHandler(config, store, "test policy"));
-    void poller.run(abort.signal);
-    // Let the daemon register presence with its first poll.
-    await new Promise((r) => setTimeout(r, 200));
+    pollerRunPromise = poller.run(abort.signal);
   });
 
   afterAll(async () => {
     abort.abort();
+    await pollerRunPromise;
     await app.close();
   });
 
@@ -63,30 +82,35 @@ describe("full cycle: MCP ask_peer -> daemon -> answer", () => {
     const client = new Client({ name: "e2e", version: "0.0.0" });
     await client.connect(transport);
 
-    const result = await client.callTool({
-      name: "ask_peer",
-      arguments: { peer: "work", question: "what do you know about me?", timeout_seconds: 30 },
-    });
-    const content = result.content as Array<{ type: string; text: string }>;
-    const parsed = JSON.parse(content[0].text) as Record<string, unknown>;
-    expect(parsed.status).toBe("answered");
-    expect(parsed.answer).toBe("STUB ANSWER");
-    expect(parsed.conversation_id).toBeTruthy();
+    try {
+      await waitForPeerOnline(client, "work");
 
-    const followup = await client.callTool({
-      name: "ask_peer",
-      arguments: {
-        peer: "work",
-        question: "and more?",
-        timeout_seconds: 30,
-        conversation_id: parsed.conversation_id,
-      },
-    });
-    const followupContent = followup.content as Array<{ type: string; text: string }>;
-    const followupParsed = JSON.parse(followupContent[0].text) as Record<string, unknown>;
-    expect(followupParsed.status).toBe("answered");
-    expect(followupParsed.conversation_id).toBe(parsed.conversation_id);
+      const parsed = toolPayload(
+        await client.callTool({
+          name: "ask_peer",
+          arguments: { peer: "work", question: "what do you know about me?", timeout_seconds: 30 },
+        }),
+      );
+      expect(parsed.status).toBe("answered");
+      expect(parsed.answer).toBe("STUB ANSWER");
+      expect(parsed.conversation_id).toBeTruthy();
 
-    await client.close();
+      const followupParsed = toolPayload(
+        await client.callTool({
+          name: "ask_peer",
+          arguments: {
+            peer: "work",
+            question: "and more?",
+            timeout_seconds: 30,
+            conversation_id: parsed.conversation_id,
+          },
+        }),
+      );
+      expect(followupParsed.status).toBe("answered");
+      expect(followupParsed.answer).toBe("STUB ANSWER");
+      expect(followupParsed.conversation_id).toBe(parsed.conversation_id);
+    } finally {
+      await client.close();
+    }
   }, 30_000);
 });
