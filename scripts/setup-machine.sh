@@ -39,6 +39,18 @@ prompt() {
   printf -v "$var_name" '%s' "$reply"
 }
 
+# ask_yn LABEL DEFAULT(y|n) -> exit code 0 for yes, 1 for no
+ask_yn() {
+  local label="$1" default="$2" hint reply
+  if [ "$default" = "y" ]; then hint="[Y/n]"; else hint="[y/N]"; fi
+  read -r -p "$label $hint: " reply || true
+  reply="${reply:-$default}"
+  case "$reply" in
+    y|Y|yes|YES|Yes) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 echo "agent-link machine setup"
 echo
 
@@ -49,7 +61,7 @@ if [ -z "$PEER_NAME" ]; then
 fi
 PEER_NAME="$(printf '%s' "$PEER_NAME" | tr '[:upper:]' '[:lower:]')"
 
-prompt RELAY_URL "Relay URL" "https://agent-link-relay.herokuapp.com"
+prompt RELAY_URL "Relay URL (your Heroku app, e.g. https://my-relay.herokuapp.com)" ""
 if [[ ! "$RELAY_URL" =~ ^https?:// ]]; then
   echo "relay url must start with http:// or https://" >&2
   exit 1
@@ -69,6 +81,53 @@ if [ -z "$TOKEN_INPUT" ]; then
   echo
 fi
 
+echo
+echo "Memory sources"
+echo "Chat transcripts (~/.cursor/projects/*/agent-transcripts) are always included."
+prompt AGENTS_ROOTS "Folders to scan for AGENTS.md memory files (comma-separated, empty for none)" ""
+
+echo
+echo "Privacy policy"
+echo "These answers generate ~/.agent-link/policy.md (instructions for the responding"
+echo "agent) and hard redaction rules in config.json (applied in code, cannot be"
+echo "bypassed by any prompt). Secrets, keys and tokens are always blocked."
+echo
+
+POLICY_EXTRA_RULES=""
+REDACT_WORDS=""
+
+if ! ask_yn "Allow discussing work projects and achievements?" "y"; then
+  POLICY_EXTRA_RULES="$POLICY_EXTRA_RULES
+- Do not discuss work projects or achievements. Only answer about general
+  habits, tools and skills."
+fi
+
+if ! ask_yn "Allow naming companies, clients and internal project codenames?" "n"; then
+  POLICY_EXTRA_RULES="$POLICY_EXTRA_RULES
+- Never name companies, clients or internal project codenames. Refer to them
+  generically (\"a client\", \"an internal project\")."
+  prompt REDACT_WORDS "Names to hard-redact from every answer (comma-separated, optional)" ""
+fi
+
+if ! ask_yn "Allow quoting or describing source code contents?" "n"; then
+  POLICY_EXTRA_RULES="$POLICY_EXTRA_RULES
+- Never quote, paraphrase or describe the contents of source code files."
+fi
+
+if ! ask_yn "Allow revealing file paths, repository and directory names?" "n"; then
+  POLICY_EXTRA_RULES="$POLICY_EXTRA_RULES
+- Never reveal file paths, repository names or directory structures."
+fi
+
+prompt EXTRA_REDACT "Any other words to hard-redact from every answer (comma-separated, optional)" ""
+if [ -n "$EXTRA_REDACT" ]; then
+  if [ -n "$REDACT_WORDS" ]; then
+    REDACT_WORDS="$REDACT_WORDS,$EXTRA_REDACT"
+  else
+    REDACT_WORDS="$EXTRA_REDACT"
+  fi
+fi
+
 mkdir -p "$AGENT_DIR"
 
 # Build daemon if not already built.
@@ -80,21 +139,27 @@ fi
 # Write config.json via node so JSON is well-formed and paths escaped.
 CONFIG_TMP="$(mktemp)"
 PEER_NAME="$PEER_NAME" RELAY_URL="$RELAY_URL" TOKEN_INPUT="$TOKEN_INPUT" \
+AGENTS_ROOTS="$AGENTS_ROOTS" REDACT_WORDS="$REDACT_WORDS" \
 node -e '
 const fs = require("node:fs");
+const splitList = (s) => (s || "").split(",").map((x) => x.trim()).filter(Boolean);
 const out = {
   relay_url: process.env.RELAY_URL,
   self_peer: process.env.PEER_NAME,
   token: process.env.TOKEN_INPUT,
   memory_sources: {
     transcripts_glob: "~/.cursor/projects/*/agent-transcripts/*.jsonl",
-    agents_md_roots: ["~/Documents/dev"],
+    agents_md_roots: splitList(process.env.AGENTS_ROOTS),
     extra_files: [],
   },
   responder: {
     cursor_agent_binary: "cursor-agent",
     workspace_dir: "~/.agent-link/workspace",
     response_timeout_seconds: 300,
+  },
+  redact: {
+    literals: splitList(process.env.REDACT_WORDS),
+    patterns: [],
   },
 };
 fs.writeFileSync(process.argv[1], JSON.stringify(out, null, 2) + "\n");
@@ -103,19 +168,36 @@ mv "$CONFIG_TMP" "$CONFIG_PATH"
 chmod 600 "$CONFIG_PATH"
 echo "wrote $CONFIG_PATH"
 
-# Seed policy.md only if it does not exist.
-if [ ! -f "$POLICY_PATH" ]; then
-  cat > "$POLICY_PATH" <<'POLICY'
-You are answering an agent from my other account. Talk about my actions,
-achievements, habits and goals. Do not disclose:
-- contents of specific source files
-- secrets, keys, tokens, passwords
-- internal names of companies, clients or projects that sound confidential
+# Generate policy.md from the wizard answers. Keep an existing file unless
+# the user agrees to replace it.
+WRITE_POLICY=1
+if [ -f "$POLICY_PATH" ]; then
+  if ask_yn "policy.md already exists, replace it with the wizard result?" "n"; then
+    cp "$POLICY_PATH" "$POLICY_PATH.bak"
+    echo "backed up old policy to $POLICY_PATH.bak"
+  else
+    WRITE_POLICY=0
+  fi
+fi
+if [ "$WRITE_POLICY" -eq 1 ]; then
+  {
+    cat <<'POLICY'
+You are answering an agent from my other account. Answer questions about my
+actions, achievements, habits and goals based on my chat history and memory.
+
+Rules:
+- Never disclose secrets, keys, tokens, passwords or credentials of any kind.
+POLICY
+    if [ -n "$POLICY_EXTRA_RULES" ]; then
+      printf '%s\n' "$POLICY_EXTRA_RULES" | sed '/^$/d'
+    fi
+    cat <<'POLICY'
 
 When in doubt, generalise or decline to answer that specific point and
 briefly explain why.
 POLICY
-  echo "wrote $POLICY_PATH (edit it to add your own rules)"
+  } > "$POLICY_PATH"
+  echo "wrote $POLICY_PATH"
 else
   echo "kept existing $POLICY_PATH"
 fi
@@ -157,3 +239,17 @@ echo "  1. On the Heroku app (once, from any machine with heroku CLI):"
 echo "       heroku config:set PEER_TOKEN_$PEER_UPPER=$TOKEN_INPUT -a <your-heroku-app>"
 echo "  2. Run this script on the OTHER machine with a different peer name and a fresh token."
 echo "  3. Restart Cursor so it picks up the new MCP server."
+echo
+echo "Where to adjust things later:"
+echo "  $POLICY_PATH"
+echo "      Soft rules: instructions the responding agent follows. Free-form text."
+echo "  $CONFIG_PATH -> \"redact\" section"
+echo "      Hard rules: literals/regex patterns cut from every outgoing answer"
+echo "      in daemon code. A prompt can never bypass these. Common secret"
+echo "      formats (API keys, tokens, private keys) are always redacted."
+echo "  $CONFIG_PATH -> \"memory_sources\", \"responder.model\""
+echo "      What the responder reads and which model it answers with."
+echo "  $MCP_PATH"
+echo "      The MCP server entry the asking side uses."
+echo "Restart the daemon after config changes:"
+echo "  launchctl kickstart -k gui/\$(id -u)/com.agent-link.responder"

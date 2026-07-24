@@ -17,4 +17,4 @@ fi
 if [ "${FAKE_AGENT_MODE:-ok}" = "hang" ]; then
   sleep 30
 fi
-echo "STUB ANSWER"
+echo "${FAKE_AGENT_ANSWER:-STUB ANSWER}"

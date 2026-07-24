@@ -67,4 +67,28 @@ describe("loadConfig", () => {
     writeFileSync(file, JSON.stringify(rest));
     expect(() => loadConfig(file)).toThrow(/memory_sources/);
   });
+
+  it("accepts a valid redact section", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-"));
+    const file = path.join(dir, "config.json");
+    writeFileSync(
+      file,
+      JSON.stringify({ ...VALID, redact: { literals: ["Acme"], patterns: ["project-\\w+"] } }),
+    );
+    expect(loadConfig(file).redact?.literals).toEqual(["Acme"]);
+  });
+
+  it("rejects redact rules that are not string arrays", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-"));
+    const file = path.join(dir, "config.json");
+    writeFileSync(file, JSON.stringify({ ...VALID, redact: { literals: [42] } }));
+    expect(() => loadConfig(file)).toThrow(/redact\.literals/);
+  });
+
+  it("rejects an invalid redact regex at load time", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-"));
+    const file = path.join(dir, "config.json");
+    writeFileSync(file, JSON.stringify({ ...VALID, redact: { patterns: ["[unclosed"] } }));
+    expect(() => loadConfig(file)).toThrow(/invalid redact pattern/);
+  });
 });

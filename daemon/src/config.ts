@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { compileRedactRules, type RedactConfig } from "./redact.js";
 
 export interface DaemonConfig {
   relay_url: string;
@@ -13,6 +14,7 @@ export interface DaemonConfig {
     response_timeout_seconds: number;
     model?: string;
   };
+  redact?: Partial<RedactConfig>;
 }
 
 export function expandHome(p: string): string {
@@ -54,6 +56,23 @@ export function loadConfig(filePath = "~/.agent-link/config.json"): DaemonConfig
     config.responder.response_timeout_seconds <= 0
   ) {
     throw new Error("config: missing responder.response_timeout_seconds");
+  }
+  if (config.redact !== undefined) {
+    if (typeof config.redact !== "object" || config.redact === null) {
+      throw new Error("config: redact must be an object");
+    }
+    for (const key of ["literals", "patterns"] as const) {
+      const value = config.redact[key];
+      if (value !== undefined && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) {
+        throw new Error(`config: redact.${key} must be an array of strings`);
+      }
+    }
+    try {
+      compileRedactRules(config.redact);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`config: invalid redact pattern: ${message}`);
+    }
   }
   config.memory_sources.transcripts_glob = expandHome(config.memory_sources.transcripts_glob);
   config.memory_sources.agents_md_roots = config.memory_sources.agents_md_roots.map(expandHome);

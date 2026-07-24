@@ -41,19 +41,19 @@ function question(overrides: Partial<Question> = {}): Question {
   };
 }
 
-let savedFakeAgentLog: string | undefined;
-let savedFakeAgentMode: string | undefined;
+const SAVED_ENV_KEYS = ["FAKE_AGENT_LOG", "FAKE_AGENT_MODE", "FAKE_AGENT_ANSWER"] as const;
+let savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
-  savedFakeAgentLog = process.env.FAKE_AGENT_LOG;
-  savedFakeAgentMode = process.env.FAKE_AGENT_MODE;
+  savedEnv = {};
+  for (const key of SAVED_ENV_KEYS) savedEnv[key] = process.env[key];
 });
 
 afterEach(() => {
-  if (savedFakeAgentLog === undefined) delete process.env.FAKE_AGENT_LOG;
-  else process.env.FAKE_AGENT_LOG = savedFakeAgentLog;
-  if (savedFakeAgentMode === undefined) delete process.env.FAKE_AGENT_MODE;
-  else process.env.FAKE_AGENT_MODE = savedFakeAgentMode;
+  for (const key of SAVED_ENV_KEYS) {
+    if (savedEnv[key] === undefined) delete process.env[key];
+    else process.env[key] = savedEnv[key];
+  }
 });
 
 describe("createHandler", () => {
@@ -82,5 +82,19 @@ describe("createHandler", () => {
 
     const taskMd = readFileSync(path.join(config.responder.workspace_dir, "task.md"), "utf8");
     expect(taskMd).toContain("Memory sources");
+  });
+
+  it("redacts configured literals and built-in secrets from the outgoing answer", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-handler-"));
+    process.env.FAKE_AGENT_ANSWER =
+      "I worked on Acme Corp with key sk-abcdefghij0123456789 last quarter.";
+
+    const config = makeConfig(dir);
+    config.redact = { literals: ["Acme Corp"] };
+    const store = new ConversationStore(path.join(dir, "conversations.json"));
+    const handler = createHandler(config, store, "test policy");
+
+    const result = await handler(question());
+    expect(result.answer).toBe("I worked on [redacted] with key [redacted] last quarter.");
   });
 });

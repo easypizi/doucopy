@@ -1,6 +1,8 @@
 {
   "name": "agent-link",
   "private": true,
+  "description": "Connect AI agents from different accounts so one can ask the other questions answered from its own memory",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": "22.x"
