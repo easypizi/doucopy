@@ -14,7 +14,7 @@
   <key>StandardErrorPath</key><string>__HOME__/.agent-link/responder.err.log</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>__HOME__/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>PATH</key><string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>
 </dict>
 </plist>

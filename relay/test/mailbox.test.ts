@@ -107,6 +107,42 @@ describe("Mailbox", () => {
     expect(box.checkReply(ticket_id)).toEqual({ status: "unknown_ticket" });
   });
 
+  it("waitForAnswer with an already-aborted signal resolves pending without consuming, later settle+checkReply still returns the answer", async () => {
+    const box = new Mailbox();
+    const { ticket_id } = box.enqueue("work", "personal", "hi");
+    const controller = new AbortController();
+    controller.abort();
+    await expect(box.waitForAnswer(ticket_id, 10_000, controller.signal)).resolves.toEqual({
+      status: "pending",
+    });
+    expect(box.settle(ticket_id, { answer: "42" })).toBe(true);
+    expect(box.checkReply(ticket_id)).toEqual({ status: "answered", answer: "42" });
+  });
+
+  it("waitForAnswer resolves pending when the signal aborts mid-wait, without consuming the entry", async () => {
+    const box = new Mailbox();
+    const { ticket_id } = box.enqueue("work", "personal", "hi");
+    const controller = new AbortController();
+    const waiting = box.waitForAnswer(ticket_id, 10_000, controller.signal);
+    controller.abort();
+    await expect(waiting).resolves.toEqual({ status: "pending" });
+    expect(box.settle(ticket_id, { answer: "later" })).toBe(true);
+    expect(box.checkReply(ticket_id)).toEqual({ status: "answered", answer: "later" });
+  });
+
+  it("when one of two waiters aborts, the surviving waiter still gets the answer on settle and single-read semantics hold", async () => {
+    const box = new Mailbox();
+    const { ticket_id } = box.enqueue("work", "personal", "hi");
+    const controller = new AbortController();
+    const aborting = box.waitForAnswer(ticket_id, 10_000, controller.signal);
+    const surviving = box.waitForAnswer(ticket_id, 10_000);
+    controller.abort();
+    await expect(aborting).resolves.toEqual({ status: "pending" });
+    expect(box.settle(ticket_id, { answer: "42" })).toBe(true);
+    await expect(surviving).resolves.toEqual({ status: "answered", answer: "42" });
+    expect(box.checkReply(ticket_id)).toEqual({ status: "unknown_ticket" });
+  });
+
   it("tracks presence from takeNext with a 60 second window", async () => {
     const box = new Mailbox();
     expect(box.isOnline("work")).toBe(false);

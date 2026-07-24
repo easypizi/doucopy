@@ -1,9 +1,10 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it, vi } from "vitest";
 import { loadPeersFromEnv } from "../src/auth.js";
 import { Mailbox } from "../src/mailbox.js";
-import { buildMcpServer } from "../src/mcp.js";
+import { buildMcpServer, type BuildMcpServerOptions } from "../src/mcp.js";
 
 function makeRegistry() {
   return loadPeersFromEnv({
@@ -12,8 +13,8 @@ function makeRegistry() {
   } as NodeJS.ProcessEnv);
 }
 
-async function connect(mailbox: Mailbox, fromPeer: string) {
-  const server = buildMcpServer(mailbox, makeRegistry(), fromPeer);
+async function connect(mailbox: Mailbox, fromPeer: string, options?: BuildMcpServerOptions) {
+  const server = buildMcpServer(mailbox, makeRegistry(), fromPeer, options);
   const client = new Client({ name: "test-client", version: "0.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -109,6 +110,30 @@ describe("MCP tools", () => {
       await client.callTool({ name: "ask_peer", arguments: { peer: "personal", question: "hi" } }),
     );
     expect(result.status).toBe("error");
+  });
+
+  it("ask_peer sends keepalive notifications while waiting for the peer to answer", async () => {
+    const mailbox = new Mailbox();
+    await mailbox.takeNext("work", 0);
+    const client = await connect(mailbox, "personal", { keepaliveIntervalMs: 20 });
+
+    const notifications: unknown[] = [];
+    client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
+      notifications.push(notification);
+    });
+
+    const asking = client.callTool({
+      name: "ask_peer",
+      arguments: { peer: "work", question: "hi", timeout_seconds: 5 },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(notifications.length).toBeGreaterThan(0);
+
+    const question = await mailbox.takeNext("work", 2000);
+    mailbox.settle(question!.ticket_id, { answer: "42" });
+    const result = payload(await asking);
+    expect(result.status).toBe("answered");
   });
 
   it("check_reply fetches a late answer", async () => {

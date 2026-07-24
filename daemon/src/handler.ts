@@ -37,7 +37,7 @@ export function createHandler(
         ? buildFirstTask(policy, question.question, collectMemory(config))
         : buildFollowupTask(policy, question.question);
       const result = await runTask(runnerOpts, chatId, task);
-      store.set(question.conversation_id, chatId);
+      if (result.answer !== undefined) store.set(question.conversation_id, chatId);
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

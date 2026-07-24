@@ -62,6 +62,13 @@ export class Poller {
             this.backoffMs = INITIAL_BACKOFF_MS;
             return "handled";
           }
+          if (answerRes.status >= 400 && answerRes.status < 500) {
+            console.error(
+              `relay rejected answer for ticket ${question.ticket_id} (HTTP ${answerRes.status}), not retrying`,
+            );
+            await this.backoff(MAX_BACKOFF_MS, signal);
+            return "retry";
+          }
         } catch {
           if (signal?.aborted) return "retry";
         }

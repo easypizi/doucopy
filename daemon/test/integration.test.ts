@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,7 +40,10 @@ describe("full cycle: MCP ask_peer -> daemon -> answer", () => {
   } as NodeJS.ProcessEnv);
   let baseUrl: string;
   let pollerRunPromise: Promise<void>;
+  let logFile: string;
+  let workspaceDir: string;
   const abort = new AbortController();
+  const savedFakeAgentLog = process.env.FAKE_AGENT_LOG;
 
   beforeAll(async () => {
     await app.listen({ port: 0, host: "127.0.0.1" });
@@ -49,6 +52,9 @@ describe("full cycle: MCP ask_peer -> daemon -> answer", () => {
     baseUrl = `http://127.0.0.1:${address.port}`;
 
     const dir = mkdtempSync(path.join(tmpdir(), "agent-link-e2e-"));
+    logFile = path.join(dir, "args.log");
+    process.env.FAKE_AGENT_LOG = logFile;
+    workspaceDir = path.join(dir, "workspace");
     const config: DaemonConfig = {
       relay_url: baseUrl,
       self_peer: "work",
@@ -60,7 +66,7 @@ describe("full cycle: MCP ask_peer -> daemon -> answer", () => {
       },
       responder: {
         cursor_agent_binary: FIXTURE,
-        workspace_dir: path.join(dir, "workspace"),
+        workspace_dir: workspaceDir,
         response_timeout_seconds: 30,
       },
     };
@@ -73,6 +79,8 @@ describe("full cycle: MCP ask_peer -> daemon -> answer", () => {
     abort.abort();
     await pollerRunPromise;
     await app.close();
+    if (savedFakeAgentLog === undefined) delete process.env.FAKE_AGENT_LOG;
+    else process.env.FAKE_AGENT_LOG = savedFakeAgentLog;
   });
 
   it("answers a question end to end and keeps the conversation id", async () => {
@@ -109,6 +117,16 @@ describe("full cycle: MCP ask_peer -> daemon -> answer", () => {
       expect(followupParsed.status).toBe("answered");
       expect(followupParsed.answer).toBe("STUB ANSWER");
       expect(followupParsed.conversation_id).toBe(parsed.conversation_id);
+
+      const logLines = readFileSync(logFile, "utf8").trimEnd().split("\n");
+      const createChatLines = logLines.filter((line) => line === "create-chat");
+      expect(createChatLines).toHaveLength(1);
+      const resumeIndexes = logLines.flatMap((line, i) => (line === "--resume" ? [i] : []));
+      expect(resumeIndexes).toHaveLength(2);
+      for (const i of resumeIndexes) expect(logLines[i + 1]).toBe("chat-123");
+
+      const taskMd = readFileSync(path.join(workspaceDir, "task.md"), "utf8");
+      expect(taskMd).not.toContain("Memory sources");
     } finally {
       await client.close();
     }

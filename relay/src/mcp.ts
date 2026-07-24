@@ -11,8 +11,21 @@ function json(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
 }
 
-export function buildMcpServer(mailbox: Mailbox, registry: PeerRegistry, fromPeer: string): McpServer {
-  const server = new McpServer({ name: "agent-link", version: "0.1.0" });
+export interface BuildMcpServerOptions {
+  keepaliveIntervalMs?: number;
+}
+
+export function buildMcpServer(
+  mailbox: Mailbox,
+  registry: PeerRegistry,
+  fromPeer: string,
+  options?: BuildMcpServerOptions,
+): McpServer {
+  const keepaliveIntervalMs = options?.keepaliveIntervalMs ?? KEEPALIVE_INTERVAL_MS;
+  const server = new McpServer(
+    { name: "agent-link", version: "0.1.0" },
+    { capabilities: { logging: {} } },
+  );
 
   server.registerTool(
     "list_peers",
@@ -58,16 +71,21 @@ export function buildMcpServer(mailbox: Mailbox, registry: PeerRegistry, fromPee
       }
       const timeoutMs = Math.min(timeout_seconds ?? DEFAULT_TIMEOUT_S, MAX_TIMEOUT_S) * 1000;
       // Heroku's router kills silent connections after 30s, so ping the SSE stream while waiting.
+      let keepaliveFailureLogged = false;
       const keepalive = setInterval(() => {
         void extra
           .sendNotification({
             method: "notifications/message",
             params: { level: "info", data: "waiting for peer answer" },
           })
-          .catch(() => undefined);
-      }, KEEPALIVE_INTERVAL_MS);
+          .catch((err) => {
+            if (keepaliveFailureLogged) return;
+            keepaliveFailureLogged = true;
+            console.error("ask_peer keepalive notification failed:", err);
+          });
+      }, keepaliveIntervalMs);
       try {
-        const result = await mailbox.waitForAnswer(ticket_id, timeoutMs);
+        const result = await mailbox.waitForAnswer(ticket_id, timeoutMs, extra.signal);
         return json({ ...result, ticket_id, conversation_id: convId });
       } finally {
         clearInterval(keepalive);

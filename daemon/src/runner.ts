@@ -26,7 +26,7 @@ export async function runTask(
   taskContent: string,
 ): Promise<{ answer?: string; error?: string }> {
   mkdirSync(opts.workspaceDir, { recursive: true });
-  writeFileSync(path.join(opts.workspaceDir, "task.md"), taskContent);
+  writeFileSync(path.join(opts.workspaceDir, "task.md"), taskContent, { mode: 0o600 });
   const args = [
     "--resume", chatId,
     "-p", TASK_INSTRUCTION,

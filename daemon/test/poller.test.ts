@@ -68,6 +68,22 @@ describe("Poller", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(4);
   });
 
+  it("stops retrying after a 404 on the answer POST (permanent failure)", async () => {
+    let postAttempts = 0;
+    const fetchImpl = vi.fn(async (url: string | URL) => {
+      if (String(url).includes("/inbox/")) {
+        return new Response(JSON.stringify(QUESTION), { status: 200 });
+      }
+      postAttempts += 1;
+      return new Response(null, { status: 404 });
+    }) as unknown as typeof fetch;
+    const poller = new Poller(CONFIG, vi.fn(async () => ({ answer: "42" })), fetchImpl, async () => undefined);
+
+    await expect(poller.pollOnce()).resolves.toBe("retry");
+    expect(postAttempts).toBe(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("handles a question when answer delivery succeeds on the third attempt", async () => {
     let postAttempts = 0;
     const fetchImpl = vi.fn(async (url: string | URL) => {

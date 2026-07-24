@@ -109,22 +109,34 @@ export class Mailbox {
     return true;
   }
 
-  waitForAnswer(ticketId: string, timeoutMs: number): Promise<ReplyStatus> {
+  waitForAnswer(ticketId: string, timeoutMs: number, signal?: AbortSignal): Promise<ReplyStatus> {
     this.cleanup();
     const entry = this.pending.get(ticketId);
     if (!entry) return Promise.resolve({ status: "unknown_ticket" });
     if (entry.settled) return Promise.resolve(this.consume(ticketId, entry));
+    if (signal?.aborted) return Promise.resolve({ status: "pending" });
     return new Promise((resolve) => {
-      const listener = () => {
+      const cleanup = () => {
         clearTimeout(timer);
         entry.settleListeners.delete(listener);
+        signal?.removeEventListener("abort", onAbort);
+      };
+      const listener = () => {
+        cleanup();
         resolve(this.consume(ticketId, entry));
       };
       const timer = setTimeout(() => {
-        entry.settleListeners.delete(listener);
+        cleanup();
         resolve({ status: "pending" });
       }, timeoutMs);
+      // The asker's connection died; leave the entry settled (if it later is) so
+      // check_reply can still retrieve the answer instead of losing it silently.
+      const onAbort = () => {
+        cleanup();
+        resolve({ status: "pending" });
+      };
       entry.settleListeners.add(listener);
+      signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
 
