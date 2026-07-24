@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { loadPeersFromEnv } from "../src/auth.js";
 import { Mailbox } from "../src/mailbox.js";
 import { buildMcpServer } from "../src/mcp.js";
@@ -69,6 +69,46 @@ describe("MCP tools", () => {
     expect(result.status).toBe("answered");
     expect(result.answer).toBe("42");
     expect(result.conversation_id).toBe(question!.conversation_id);
+  });
+
+  it("ask_peer clamps timeout_seconds and passes ms to waitForAnswer", async () => {
+    const mailbox = new Mailbox();
+    await mailbox.takeNext("work", 0);
+    const waitSpy = vi.spyOn(mailbox, "waitForAnswer").mockResolvedValue({ status: "pending" });
+    const client = await connect(mailbox, "personal");
+
+    await client.callTool({
+      name: "ask_peer",
+      arguments: { peer: "work", question: "q1", timeout_seconds: 999 },
+    });
+    await client.callTool({
+      name: "ask_peer",
+      arguments: { peer: "work", question: "q2" },
+    });
+
+    expect(waitSpy).toHaveBeenCalledTimes(2);
+    expect(waitSpy.mock.calls[0][1]).toBe(240_000);
+    expect(waitSpy.mock.calls[1][1]).toBe(120_000);
+  });
+
+  it("ask_peer peer_offline keeps the question queued for the peer", async () => {
+    const mailbox = new Mailbox();
+    const client = await connect(mailbox, "personal");
+    const result = payload(
+      await client.callTool({ name: "ask_peer", arguments: { peer: "work", question: "hi" } }),
+    );
+    expect(result.status).toBe("peer_offline");
+    const question = await mailbox.takeNext("work", 0);
+    expect(question?.ticket_id).toBe(result.ticket_id);
+  });
+
+  it("ask_peer rejects asking yourself", async () => {
+    const mailbox = new Mailbox();
+    const client = await connect(mailbox, "personal");
+    const result = payload(
+      await client.callTool({ name: "ask_peer", arguments: { peer: "personal", question: "hi" } }),
+    );
+    expect(result.status).toBe("error");
   });
 
   it("check_reply fetches a late answer", async () => {
