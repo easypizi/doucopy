@@ -74,6 +74,7 @@ export function loadConfig(filePath = "~/.agent-link/config.json"): DaemonConfig
       throw new Error(`config: invalid redact pattern: ${message}`);
     }
   }
+  config.relay_url = config.relay_url.replace(/\/+$/, "");
   config.memory_sources.transcripts_glob = expandHome(config.memory_sources.transcripts_glob);
   config.memory_sources.agents_md_roots = config.memory_sources.agents_md_roots.map(expandHome);
   config.memory_sources.extra_files = config.memory_sources.extra_files.map(expandHome);

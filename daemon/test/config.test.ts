@@ -85,6 +85,13 @@ describe("loadConfig", () => {
     expect(() => loadConfig(file)).toThrow(/redact\.literals/);
   });
 
+  it("strips trailing slashes from relay_url so poll URLs are never doubled", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-"));
+    const file = path.join(dir, "config.json");
+    writeFileSync(file, JSON.stringify({ ...VALID, relay_url: "https://example.com//" }));
+    expect(loadConfig(file).relay_url).toBe("https://example.com");
+  });
+
   it("rejects an invalid redact regex at load time", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "agent-link-"));
     const file = path.join(dir, "config.json");

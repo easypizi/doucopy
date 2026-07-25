@@ -96,7 +96,7 @@ Everything lives in `~/.agent-link/` on each machine.
   "self_peer": "work",
   "token": "<peer token>",
   "memory_sources": {
-    "transcripts_glob": "~/.cursor/projects/*/agent-transcripts/*.jsonl",
+    "transcripts_glob": "~/.cursor/projects/*/agent-transcripts/**/*.jsonl",
     "agents_md_roots": ["~/dev"],
     "extra_files": []
   },
@@ -104,7 +104,7 @@ Everything lives in `~/.agent-link/` on each machine.
     "cursor_agent_binary": "cursor-agent",
     "workspace_dir": "~/.agent-link/workspace",
     "response_timeout_seconds": 300,
-    "model": "sonnet-4.5"
+    "model": "composer-2.5"
   },
   "redact": {
     "literals": ["Acme Corp", "project-hydra"],
@@ -114,7 +114,7 @@ Everything lives in `~/.agent-link/` on each machine.
 ```
 
 - `memory_sources` controls what the responder is allowed to read.
-- `responder.model` is optional. The responding account pays for its own tokens, so it can pick a cheaper model.
+- `responder.model` is optional (the setup wizard defaults it to `composer-2.5`). The responding account pays for its own tokens, so it can pick a cheaper model. Run `cursor-agent --list-models` to see what your account offers.
 - `redact` is the hard filter, see below.
 
 Restart the daemon after changing the config:

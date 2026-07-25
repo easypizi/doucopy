@@ -209,6 +209,7 @@ const out = {
     cursor_agent_binary: "cursor-agent",
     workspace_dir: "~/.agent-link/workspace",
     response_timeout_seconds: 300,
+    model: "composer-2.5",
   },
   redact: {
     literals: splitList(process.env.REDACT_WORDS),

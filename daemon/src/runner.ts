@@ -1,11 +1,31 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 
-const execFileAsync = promisify(execFile);
 const TASK_INSTRUCTION = "Read the file task.md in this workspace and follow the instructions in it.";
 const CREATE_CHAT_TIMEOUT_MS = 30_000;
+const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
+
+// cursor-agent spawns child processes that inherit its stdio pipes. Killing only
+// the direct child leaves those grandchildren holding the pipes open, so waiting
+// for the process to "close" hangs forever. Each spawn below runs detached (its
+// own process group) and this kills the entire group.
+function killTree(proc: ChildProcess): void {
+  if (proc.pid !== undefined) {
+    try {
+      process.kill(-proc.pid, "SIGKILL");
+    } catch {
+      // process group already gone
+    }
+  }
+  try {
+    proc.kill("SIGKILL");
+  } catch {
+    // already dead
+  }
+  proc.stdout?.destroy();
+  proc.stderr?.destroy();
+}
 
 export interface RunnerOptions {
   binary: string;
@@ -21,6 +41,7 @@ export async function createChat(opts: RunnerOptions): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const proc = spawn(opts.binary, ["create-chat"], {
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     });
     let buffer = "";
     let settled = false;
@@ -28,7 +49,7 @@ export async function createChat(opts: RunnerOptions): Promise<string> {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (!proc.killed) proc.kill();
+      killTree(proc);
       fn();
     };
     const timer = setTimeout(() => {
@@ -73,15 +94,55 @@ export async function runTask(
     "--workspace", opts.workspaceDir,
   ];
   if (opts.model) args.push("--model", opts.model);
-  try {
-    const { stdout } = await execFileAsync(opts.binary, args, {
-      timeout: opts.timeoutMs,
-      maxBuffer: 10 * 1024 * 1024,
+  return new Promise((resolve) => {
+    const proc = spawn(opts.binary, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     });
-    const answer = stdout.trim();
-    return answer ? { answer } : { error: "responder produced empty output" };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { error: `cursor-agent failed: ${message.slice(0, 500)}` };
-  }
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let graceTimer: NodeJS.Timeout | undefined;
+    const settle = (result: { answer?: string; error?: string }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (graceTimer) clearTimeout(graceTimer);
+      killTree(proc);
+      resolve(result);
+    };
+    const finalize = (code: number | null) => {
+      if (code !== 0) {
+        const detail = stderr.trim() || `exited with code ${code}`;
+        settle({ error: `cursor-agent failed: ${detail.slice(0, 500)}` });
+        return;
+      }
+      const answer = stdout.trim();
+      settle(answer ? { answer } : { error: "responder produced empty output" });
+    };
+    // Settle immediately on timeout instead of waiting for "close": the whole
+    // point is to survive processes that never release their stdio pipes.
+    const timer = setTimeout(() => {
+      settle({ error: `cursor-agent failed: timed out after ${opts.timeoutMs}ms` });
+    }, opts.timeoutMs);
+    proc.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+      if (stdout.length > MAX_OUTPUT_BYTES) {
+        settle({ error: "cursor-agent failed: output exceeded 10MB" });
+      }
+    });
+    proc.stderr.on("data", (chunk: Buffer) => {
+      if (stderr.length < MAX_OUTPUT_BYTES) stderr += chunk.toString("utf8");
+    });
+    proc.on("error", (err) => {
+      settle({ error: `cursor-agent failed: ${err.message.slice(0, 500)}` });
+    });
+    // "close" waits for stdio to drain, which never happens when a grandchild
+    // keeps the pipes open. Back it up with "exit" plus a short grace period so
+    // an answer printed before exit is still delivered.
+    proc.on("exit", (code) => {
+      graceTimer = setTimeout(() => finalize(code), 1500);
+    });
+    proc.on("close", (code) => finalize(code));
+  });
 }

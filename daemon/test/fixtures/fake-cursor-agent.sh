@@ -23,4 +23,11 @@ fi
 if [ "${FAKE_AGENT_MODE:-ok}" = "hang" ]; then
   sleep 30
 fi
+if [ "${FAKE_AGENT_MODE:-ok}" = "grandchild-hang" ]; then
+  # Print the answer, leave a background child holding the stdio pipes, exit.
+  # Mimics cursor-agent builds whose helper processes outlive the main one.
+  echo "${FAKE_AGENT_ANSWER:-STUB ANSWER}"
+  sleep 30 &
+  exit 0
+fi
 echo "${FAKE_AGENT_ANSWER:-STUB ANSWER}"

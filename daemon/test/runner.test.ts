@@ -103,7 +103,18 @@ describe("runTask", () => {
     const opts = makeOpts();
     opts.timeoutMs = 500;
     process.env.FAKE_AGENT_MODE = "hang";
+    const started = Date.now();
     const result = await runTask(opts, "chat-123", "# task body");
-    expect(result.error).toMatch(/cursor-agent failed/);
+    expect(result.error).toMatch(/timed out/);
+    expect(Date.now() - started).toBeLessThan(3_000);
+  }, 10_000);
+
+  it("still returns the answer when a grandchild keeps the stdio pipes open", async () => {
+    const opts = makeOpts();
+    process.env.FAKE_AGENT_MODE = "grandchild-hang";
+    const started = Date.now();
+    const result = await runTask(opts, "chat-123", "# task body");
+    expect(result).toEqual({ answer: "STUB ANSWER" });
+    expect(Date.now() - started).toBeLessThan(4_000);
   }, 10_000);
 });
