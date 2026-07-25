@@ -40,6 +40,11 @@ describe("buildFirstTask", () => {
     expect(task).toContain("built-in Cursor Memories");
     expect(task).toContain("trace back to a source");
   });
+
+  it("mentions the agent-link-answer skill as the search-method reference", () => {
+    const task = buildFirstTask("Do not share secrets.", "What have I done?", MEMORY);
+    expect(task).toContain("agent-link-answer");
+  });
 });
 
 describe("buildFollowupTask", () => {
@@ -67,5 +72,10 @@ describe("buildFollowupTask", () => {
   it("also allows built-in Cursor Memories on follow-ups", () => {
     const task = buildFollowupTask("Do not share secrets.", "Anything else?");
     expect(task).toContain("built-in Cursor Memories");
+  });
+
+  it("mentions the agent-link-answer skill on follow-ups", () => {
+    const task = buildFollowupTask("Do not share secrets.", "Anything else?");
+    expect(task).toContain("agent-link-answer");
   });
 });

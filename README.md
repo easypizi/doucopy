@@ -180,6 +180,20 @@ npm run daemon:rebuild    # git pull + npm install + build + restart
 npm run daemon:uninstall  # unload and remove the plist (config stays)
 ```
 
+## Agent skills
+
+The repo ships a set of Cursor Agent Skills that teach the agent how to work with agent-link (asking, answering, setup, troubleshooting, relay ops, privacy, and product development). They live in [.cursor/skills/](.cursor/skills/).
+
+Two of them, `agent-link-ask` and `agent-link-answer`, are useful in any workspace, so they can be symlinked into the user-level Cursor skills directory:
+
+```bash
+make skills-install    # symlink ask/answer into ~/.cursor/skills/
+make skills-status     # show what is installed
+make skills-uninstall  # remove the symlinks
+```
+
+The remaining skills (`agent-link-setup`, `agent-link-troubleshoot`, `agent-link-relay`, `agent-link-privacy`, `agent-link-dev`) stay repo-scoped: they only need to fire when you are working on agent-link itself.
+
 ## Costs
 
 Each side pays for its own agent. The asker pays for its turn as usual. The responder pays for the `cursor-agent` run on its machine, using whatever model is set in `responder.model`.
@@ -197,6 +211,29 @@ Run the relay locally:
 ```bash
 PEER_TOKEN_A=aaa PEER_TOKEN_B=bbb PORT=3000 npm start -w relay
 ```
+
+## Make targets
+
+A `Makefile` wraps everything above, run `make` to see the list:
+
+```bash
+make install        # npm install for all workspaces
+make build          # tsc for both workspaces
+make test           # full suite once (make test-watch for watch mode)
+make typecheck      # tsc --noEmit, no build output
+make clean          # remove relay/dist and daemon/dist
+make relay          # build, then run the relay locally on PORT (default 3000)
+
+make setup          # same as npm run daemon:install
+make start          # start / stop / restart / status / logs / rebuild / uninstall
+
+make deploy         # git push heroku HEAD:main
+make release-token PEER=WORK TOKEN=<token> APP=my-agent-link-relay
+make config APP=my-agent-link-relay
+make logs-relay APP=my-agent-link-relay
+```
+
+The daemon targets are thin aliases for the `npm run daemon:*` scripts, use whichever you prefer. `APP` is optional if your repo already has a `heroku` git remote.
 
 ## License
 
