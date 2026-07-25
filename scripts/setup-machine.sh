@@ -201,7 +201,7 @@ const out = {
   self_peer: process.env.PEER_NAME,
   token: process.env.TOKEN_INPUT,
   memory_sources: {
-    transcripts_glob: "~/.cursor/projects/*/agent-transcripts/*.jsonl",
+    transcripts_glob: "~/.cursor/projects/*/agent-transcripts/**/*.jsonl",
     agents_md_roots: splitList(process.env.AGENTS_ROOTS),
     extra_files: splitList(process.env.EXTRA_FILES),
   },
