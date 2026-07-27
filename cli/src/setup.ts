@@ -89,18 +89,55 @@ export function writeDefaultPolicy(home: string): boolean {
 
 export type HarnessKind = "cursor-agent" | "claude" | "codex";
 
+// Asker detection is "does this machine already have that tool's config dir",
+// which tells us where to drop an MCP config entry. It says nothing about
+// whether the same tool can *run* as a responder.
+export interface DetectedAskers {
+  cursor: boolean;
+  claude: boolean;
+  codex: boolean;
+}
+
+// Responder detection is strictly "is this binary on PATH", because that is
+// what the daemon will actually shell out to.
+export interface DetectedResponders {
+  cursor: boolean;
+  claude: boolean;
+  codex: boolean;
+}
+
+// Kept for backwards compatibility so callers/tests that used the old combined
+// shape continue to work. `cursor` field mirrors asker detection (config dir
+// present), the others mirror responder detection.
 export interface DetectedHarnesses {
   cursor: boolean;
   claude: boolean;
   codex: boolean;
 }
 
-export function detectHarnesses(home: string): DetectedHarnesses {
-  const cursor = existsSync(path.join(home, ".cursor")) || which("cursor-agent");
+export function detectAskers(home: string): DetectedAskers {
   return {
-    cursor,
+    cursor: existsSync(path.join(home, ".cursor")),
+    claude: existsSync(path.join(home, ".claude.json")) || existsSync(path.join(home, ".claude")),
+    codex: existsSync(path.join(home, ".codex")),
+  };
+}
+
+export function detectResponders(): DetectedResponders {
+  return {
+    cursor: which("cursor-agent"),
     claude: which("claude"),
     codex: which("codex"),
+  };
+}
+
+export function detectHarnesses(home: string): DetectedHarnesses {
+  const askers = detectAskers(home);
+  const responders = detectResponders();
+  return {
+    cursor: askers.cursor || responders.cursor,
+    claude: responders.claude,
+    codex: responders.codex,
   };
 }
 
@@ -109,14 +146,28 @@ function which(binary: string): boolean {
   return res.status === 0;
 }
 
-function writeMcpJson(file: string, relayUrl: string, token: string): void {
+// `strictParse` controls what happens if the existing file is unparseable JSON.
+// - Cursor's ~/.cursor/mcp.json only holds MCP config: silently start fresh.
+// - Claude's ~/.claude.json holds the *entire* Claude Code state (projects,
+//   sessions, todos). Overwriting it would wipe the user's history, so we
+//   refuse and let the user recover the file themselves.
+function writeMcpJson(file: string, relayUrl: string, token: string, strictParse = false): void {
   mkdirSync(path.dirname(file), { recursive: true });
   let data: { mcpServers?: Record<string, unknown> } = {};
   if (existsSync(file)) {
     const raw = readFileSync(file, "utf8");
     try {
-      data = JSON.parse(raw) as typeof data;
-    } catch {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === "object") {
+        data = parsed as typeof data;
+      } else if (strictParse) {
+        throw new Error(`${file} does not contain a JSON object; refusing to overwrite`);
+      }
+    } catch (err) {
+      if (strictParse) {
+        const detail = err instanceof Error ? err.message : String(err);
+        throw new Error(`${file} is not valid JSON; refusing to overwrite (fix or move it, then re-run). Parse error: ${detail}`);
+      }
       data = {};
     }
     writeFileSync(`${file}.bak`, raw);
@@ -132,20 +183,21 @@ function writeMcpJson(file: string, relayUrl: string, token: string): void {
 
 export function mergeMcpJson(home: string, relayUrl: string, token: string): string {
   const file = path.join(home, ".cursor", "mcp.json");
-  writeMcpJson(file, relayUrl, token);
+  writeMcpJson(file, relayUrl, token, false);
   return file;
 }
 
 export function mergeClaudeMcp(home: string, relayUrl: string, token: string): string {
   const file = path.join(home, ".claude.json");
-  writeMcpJson(file, relayUrl, token);
+  writeMcpJson(file, relayUrl, token, true);
   return file;
 }
 
-// Merges the [mcp_servers.agent-link] block into ~/.codex/config.toml,
-// backing up the previous file to config.toml.bak. We do not depend on a
-// TOML library: the block has a fixed shape and we regex-replace the whole
-// section, preserving everything else verbatim.
+// Merges the [mcp_servers.agent-link] block into ~/.codex/config.toml.
+// A line-based parser is used instead of a regex so section bodies that
+// contain "[" (e.g. TOML arrays like `enabled_tools = ["x"]`) aren't cut
+// short. The section runs from its header up to the next line that starts
+// with "[" at column 0 (a new table/array-of-tables header) or EOF.
 export function mergeCodexToml(home: string, relayUrl: string, token: string): string {
   const dir = path.join(home, ".codex");
   const file = path.join(dir, "config.toml");
@@ -155,17 +207,44 @@ export function mergeCodexToml(home: string, relayUrl: string, token: string): s
     "[mcp_servers.agent-link]",
     `url = "${url}"`,
     `bearer_token = "${token}"`,
-    "",
-  ].join("\n");
+  ];
   let existing = "";
   if (existsSync(file)) {
     existing = readFileSync(file, "utf8");
     writeFileSync(`${file}.bak`, existing);
   }
-  const sectionRe = /\[mcp_servers\.agent-link\][^\[]*(?=\n\[|\n?$)/;
-  const next = sectionRe.test(existing)
-    ? existing.replace(sectionRe, block.trimEnd())
-    : (existing.trimEnd() ? `${existing.trimEnd()}\n\n${block}` : block);
-  writeFileSync(file, next.endsWith("\n") ? next : `${next}\n`, { mode: 0o600 });
+  const merged = replaceCodexAgentLinkSection(existing, block);
+  writeFileSync(file, merged.endsWith("\n") ? merged : `${merged}\n`, { mode: 0o600 });
   return file;
+}
+
+// Exported for tests. Splits `input` into lines, finds
+// `[mcp_servers.agent-link]`, drops everything until the next header line
+// (starts with "["), then splices in `blockLines`. Preserves neighbouring
+// blank lines. If the section is absent, appends the block with a blank line
+// separator.
+export function replaceCodexAgentLinkSection(input: string, blockLines: string[]): string {
+  const HEADER = "[mcp_servers.agent-link]";
+  const lines = input.length === 0 ? [] : input.split("\n");
+  // Split may leave a trailing empty string when input ends with "\n"; keep it
+  // for round-trip stability.
+  const start = lines.findIndex((line) => line.trim() === HEADER);
+  if (start === -1) {
+    const trimmed = lines.length > 0 && lines[lines.length - 1] === "" ? lines.slice(0, -1) : lines;
+    if (trimmed.length === 0) return `${blockLines.join("\n")}\n`;
+    return `${trimmed.join("\n")}\n\n${blockLines.join("\n")}\n`;
+  }
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (lines[i].startsWith("[")) { end = i; break; }
+  }
+  const before = lines.slice(0, start);
+  const after = lines.slice(end);
+  const parts: string[] = [];
+  if (before.length > 0) parts.push(before.join("\n").replace(/\n+$/, ""));
+  parts.push(blockLines.join("\n"));
+  const rest = after.join("\n").replace(/^\n+/, "");
+  if (rest.length > 0) parts.push(rest);
+  const joined = parts.join("\n\n");
+  return joined.endsWith("\n") ? joined : `${joined}\n`;
 }

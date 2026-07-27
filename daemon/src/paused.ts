@@ -33,49 +33,59 @@ function writeMap(file: string, map: Record<string, number | null>): void {
   writeFileSync(file, `${JSON.stringify(map, null, 2)}\n`, { mode: 0o600 });
 }
 
+// Reads never mutate the file. The daemon's poller calls isPaused on every
+// incoming question, potentially concurrently with a `agent-link pause`
+// command, and a read-modify-write from the reader side is a classic race that
+// can lose a freshly-written pause entry. Expiry cleanup is the writers' job.
 export function isPaused(peer: string, file: string = pausedPath(), now: number = Date.now()): boolean {
   const map = readMap(file);
   if (!(peer in map)) return false;
   const until = map[peer];
   if (until === null) return true;
-  if (until > now) return true;
-  // expired, drop it lazily so subsequent status reads stay clean
-  delete map[peer];
-  writeMap(file, map);
-  return false;
+  return until > now;
 }
 
-export function pausedUntil(peer: string, file: string = pausedPath()): number | null | undefined {
+export function pausedUntil(peer: string, file: string = pausedPath(), now: number = Date.now()): number | null | undefined {
   const map = readMap(file);
-  return peer in map ? map[peer] : undefined;
+  if (!(peer in map)) return undefined;
+  const until = map[peer];
+  if (until !== null && until <= now) return undefined;
+  return until;
 }
 
-export function pausePeer(peer: string, untilMs: number | null, file: string = pausedPath()): void {
-  const map = readMap(file);
-  map[peer] = untilMs;
-  writeMap(file, map);
-}
-
-export function resumePeer(peer: string, file: string = pausedPath()): boolean {
-  const map = readMap(file);
-  if (!(peer in map)) return false;
-  delete map[peer];
-  writeMap(file, map);
-  return true;
-}
-
-export function listPaused(file: string = pausedPath(), now: number = Date.now()): PausedEntry[] {
-  const map = readMap(file);
-  const out: PausedEntry[] = [];
+function pruneExpired(map: Record<string, number | null>, now: number): boolean {
   let changed = false;
   for (const [peer, until] of Object.entries(map)) {
     if (until !== null && until <= now) {
       delete map[peer];
       changed = true;
-      continue;
     }
+  }
+  return changed;
+}
+
+export function pausePeer(peer: string, untilMs: number | null, file: string = pausedPath(), now: number = Date.now()): void {
+  const map = readMap(file);
+  pruneExpired(map, now);
+  map[peer] = untilMs;
+  writeMap(file, map);
+}
+
+export function resumePeer(peer: string, file: string = pausedPath(), now: number = Date.now()): boolean {
+  const map = readMap(file);
+  const hadExpired = pruneExpired(map, now);
+  const had = peer in map;
+  if (had) delete map[peer];
+  if (had || hadExpired) writeMap(file, map);
+  return had;
+}
+
+export function listPaused(file: string = pausedPath(), now: number = Date.now()): PausedEntry[] {
+  const map = readMap(file);
+  const out: PausedEntry[] = [];
+  for (const [peer, until] of Object.entries(map)) {
+    if (until !== null && until <= now) continue;
     out.push({ peer, until_ms: until });
   }
-  if (changed) writeMap(file, map);
   return out.sort((a, b) => a.peer.localeCompare(b.peer));
 }

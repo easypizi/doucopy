@@ -4,26 +4,27 @@ import { fetchStatus, joinRelay, normalizeRelayUrl } from "./api.js";
 import { installDaemon } from "./launchd.js";
 import {
   defaultConfig,
-  detectHarnesses,
+  detectAskers,
+  detectResponders,
   discoverMemorySources,
   mergeClaudeMcp,
   mergeCodexToml,
   mergeMcpJson,
   writeConfig,
   writeDefaultPolicy,
-  type DetectedHarnesses,
+  type DetectedResponders,
   type HarnessKind,
 } from "./setup.js";
 
 const NAME_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 
-async function chooseResponderHarness(detected: DetectedHarnesses, rl: ReturnType<typeof createInterface>): Promise<HarnessKind> {
+async function chooseResponderHarness(detected: DetectedResponders, rl: ReturnType<typeof createInterface>): Promise<HarnessKind> {
   const available: HarnessKind[] = [];
   if (detected.cursor) available.push("cursor-agent");
   if (detected.claude) available.push("claude");
   if (detected.codex) available.push("codex");
   if (available.length === 0) {
-    console.log("no harness detected on PATH, defaulting to cursor-agent (install it before starting the daemon)");
+    console.log("no responder harness binary found on PATH, defaulting to cursor-agent (install it before starting the daemon)");
     return "cursor-agent";
   }
   if (available.length === 1) {
@@ -50,8 +51,7 @@ export async function runJoin(relayUrlArg: string, invite: string): Promise<void
     while (!NAME_PATTERN.test(name)) {
       name = (await rl.question("Peer name for this machine (letters, digits, . _ -): ")).trim();
     }
-    const home = homedir();
-    harness = await chooseResponderHarness(detectHarnesses(home), rl);
+    harness = await chooseResponderHarness(detectResponders(), rl);
   } finally {
     rl.close();
   }
@@ -72,10 +72,10 @@ export async function runJoin(relayUrlArg: string, invite: string): Promise<void
   console.log(`wrote ${configPath}`);
   if (writeDefaultPolicy(home)) console.log("wrote default ~/.agent-link/policy.md");
 
-  const detected = detectHarnesses(home);
-  if (detected.cursor) console.log(`updated ${mergeMcpJson(home, relayUrl, token)}`);
-  if (detected.claude) console.log(`updated ${mergeClaudeMcp(home, relayUrl, token)}`);
-  if (detected.codex) console.log(`updated ${mergeCodexToml(home, relayUrl, token)}`);
+  const askers = detectAskers(home);
+  if (askers.cursor) console.log(`updated ${mergeMcpJson(home, relayUrl, token)}`);
+  if (askers.claude) console.log(`updated ${mergeClaudeMcp(home, relayUrl, token)}`);
+  if (askers.codex) console.log(`updated ${mergeCodexToml(home, relayUrl, token)}`);
 
   installDaemon(home);
   console.log("installed and started the responder daemon");

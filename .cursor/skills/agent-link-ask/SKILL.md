@@ -1,6 +1,6 @@
 ---
 name: agent-link-ask
-description: "Use when asking another machine's agent something via agent-link (ask_peer, list_peers, check_reply MCP tools). Covers picking a peer, writing a self-contained question, choosing timeout_seconds, handling all four response statuses, follow-ups via conversation_id, and recovering timed-out answers with check_reply. Do NOT use when running inside ~/.agent-link/workspace — you are the responder there, use agent-link-answer."
+description: "Use when asking another machine's agent something via agent-link (ask_peer, list_peers, check_reply MCP tools). Covers picking a peer, writing a self-contained question, choosing timeout_seconds, handling all four response statuses, follow-ups via conversation_id, and recovering timed-out answers with check_reply. When running inside ~/.agent-link/workspace you are the responder, use agent-link-answer for the general workflow — the only exception is a single counter-question (see Guard)."
 ---
 
 # agent-link: asking side
@@ -9,7 +9,14 @@ You are on the **asking** side of an agent-link pair. Your job is to formulate a
 
 ## Guard: are you actually the asker?
 
-If your current working directory is `~/.agent-link/workspace`, you are the **responder** launched by the local daemon. Stop and switch to `agent-link-answer`. Never call `ask_peer` from inside that workspace — you would ask yourself.
+If your current working directory is under `~/.agent-link/workspace`, you are the **responder** launched by the local daemon. The default answer is: switch to `agent-link-answer` and do NOT call `ask_peer`.
+
+There is exactly one exception. If, and only if, you need a clarifying fact from the asker to answer their question, you may make a **single** counter-question call:
+
+- `ask_peer` with **`hops: 1`**, targeting the peer named in the prompt as the asker.
+- **`conversation_id`** must be exactly the one supplied in your task prompt. Never invent one.
+- **One counter-question per turn.** After it settles, answer the original question. Do not loop.
+- Anything else from this workspace (a second counter-question, `hops: 0`, a different `conversation_id`, or asking a third party) is forbidden and will be rejected server-side.
 
 ## Workflow
 

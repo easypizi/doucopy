@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -50,6 +50,41 @@ describe("paused module", () => {
     pausePeer("expired", Date.now() - 1000, file);
     const entries = listPaused(file);
     expect(entries.map((e) => e.peer)).toEqual(["alpha", "zeta"]);
+  });
+
+  it("readers never mutate the file, even when entries have expired", () => {
+    const file = tmpFile();
+    // Pause "work" indefinitely so the entry is real.
+    pausePeer("work", null, file);
+    // Now write an expired entry by hand alongside it.
+    const raw = JSON.parse(readFileSync(file, "utf8")) as Record<string, number | null>;
+    raw["stale"] = Date.now() - 5000;
+    writeFileSync(file, JSON.stringify(raw));
+    const mtimeBefore = statSync(file).mtimeMs;
+    // Read-only operations must not rewrite the file.
+    expect(isPaused("stale", file)).toBe(false);
+    expect(isPaused("work", file)).toBe(true);
+    expect(pausedUntil("stale", file)).toBeUndefined();
+    expect(listPaused(file).map((e) => e.peer)).toEqual(["work"]);
+    const mtimeAfter = statSync(file).mtimeMs;
+    expect(mtimeAfter).toBe(mtimeBefore);
+    // The stale entry is still on disk — writers get to clean it up.
+    const stillThere = JSON.parse(readFileSync(file, "utf8")) as Record<string, number | null>;
+    expect("stale" in stillThere).toBe(true);
+  });
+
+  it("writers prune expired entries", () => {
+    const file = tmpFile();
+    pausePeer("work", null, file);
+    const raw = JSON.parse(readFileSync(file, "utf8")) as Record<string, number | null>;
+    raw["stale"] = Date.now() - 5000;
+    writeFileSync(file, JSON.stringify(raw));
+    // A pausePeer for a different peer should sweep the stale one out.
+    pausePeer("other", null, file);
+    const cleaned = JSON.parse(readFileSync(file, "utf8")) as Record<string, number | null>;
+    expect("stale" in cleaned).toBe(false);
+    expect("work" in cleaned).toBe(true);
+    expect("other" in cleaned).toBe(true);
   });
 
   it("recovers from a corrupt file", () => {

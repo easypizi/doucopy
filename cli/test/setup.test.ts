@@ -4,11 +4,13 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   defaultConfig,
+  detectAskers,
   detectHarnesses,
   discoverMemorySources,
   mergeClaudeMcp,
   mergeCodexToml,
   mergeMcpJson,
+  replaceCodexAgentLinkSection,
   writeConfig,
   writeDefaultPolicy,
 } from "../src/setup.js";
@@ -100,6 +102,16 @@ describe("mergeClaudeMcp", () => {
     });
   });
 
+  it("refuses to overwrite a corrupt ~/.claude.json (would nuke Claude Code state)", () => {
+    const home = makeHome();
+    const file = path.join(home, ".claude.json");
+    writeFileSync(file, "not-json {{{");
+    expect(() => mergeClaudeMcp(home, "https://r.example.com", "tok"))
+      .toThrow(/is not valid JSON; refusing to overwrite/);
+    // Original file must be untouched by content.
+    expect(readFileSync(file, "utf8")).toBe("not-json {{{");
+  });
+
   it("preserves other Claude Code settings and creates a backup", () => {
     const home = makeHome();
     const file = path.join(home, ".claude.json");
@@ -154,18 +166,94 @@ describe("mergeCodexToml", () => {
   });
 });
 
-describe("detectHarnesses", () => {
-  it("reports cursor when ~/.cursor exists", () => {
+describe("detectHarnesses / detectAskers", () => {
+  it("detectAskers reports cursor when ~/.cursor exists but not otherwise", () => {
     const home = makeHome();
+    expect(detectAskers(home).cursor).toBe(false);
     mkdirSync(path.join(home, ".cursor"), { recursive: true });
-    expect(detectHarnesses(home).cursor).toBe(true);
+    expect(detectAskers(home).cursor).toBe(true);
   });
 
-  it("does not lie about claude/codex just because ~/.cursor exists", () => {
+  it("detectAskers reports claude only when ~/.claude.json or ~/.claude exists", () => {
+    const home = makeHome();
+    expect(detectAskers(home).claude).toBe(false);
+    writeFileSync(path.join(home, ".claude.json"), "{}");
+    expect(detectAskers(home).claude).toBe(true);
+  });
+
+  it("detectAskers reports codex only when ~/.codex exists", () => {
+    const home = makeHome();
+    expect(detectAskers(home).codex).toBe(false);
+    mkdirSync(path.join(home, ".codex"), { recursive: true });
+    expect(detectAskers(home).codex).toBe(true);
+  });
+
+  it("legacy detectHarnesses does not lie about claude/codex based on ~/.cursor", () => {
     const home = makeHome();
     mkdirSync(path.join(home, ".cursor"), { recursive: true });
     const detected = detectHarnesses(home);
     expect(typeof detected.claude).toBe("boolean");
     expect(typeof detected.codex).toBe("boolean");
+  });
+});
+
+describe("replaceCodexAgentLinkSection", () => {
+  it("keeps sibling sections whose bodies contain arrays with '['", () => {
+    const input = [
+      "[mcp_servers.agent-link]",
+      'url = "https://old/mcp"',
+      'bearer_token = "old"',
+      "",
+      "[mcp_servers.other]",
+      'enabled_tools = ["a", "b", "c"]',
+      'command = "x"',
+      "",
+    ].join("\n");
+    const result = replaceCodexAgentLinkSection(input, [
+      "[mcp_servers.agent-link]",
+      'url = "https://new/mcp"',
+      'bearer_token = "new"',
+    ]);
+    expect(result).toContain('url = "https://new/mcp"');
+    expect(result).not.toContain('url = "https://old/mcp"');
+    // Sibling section must still be there in full, arrays intact.
+    expect(result).toContain("[mcp_servers.other]");
+    expect(result).toContain('enabled_tools = ["a", "b", "c"]');
+    expect(result).toContain('command = "x"');
+  });
+
+  it("does not swallow the following section even when the agent-link body itself contains an array", () => {
+    // Regression: the old regex used [^\[]* which stopped at the first "[",
+    // so an array inside the section would prematurely end the match. The
+    // opposite (over-matching) is tested here.
+    const input = [
+      "[mcp_servers.agent-link]",
+      'url = "https://old/mcp"',
+      'bearer_token = "old"',
+      'enabled_tools = ["x"]',
+      "",
+      "[mcp_servers.keep_me]",
+      'command = "y"',
+      "",
+    ].join("\n");
+    const result = replaceCodexAgentLinkSection(input, [
+      "[mcp_servers.agent-link]",
+      'url = "https://new/mcp"',
+      'bearer_token = "new"',
+    ]);
+    expect(result).not.toContain('enabled_tools');
+    expect(result).toContain("[mcp_servers.keep_me]");
+    expect(result).toContain('command = "y"');
+  });
+
+  it("appends the section to a file that does not have it", () => {
+    const input = "approval_policy = \"on-request\"\n";
+    const result = replaceCodexAgentLinkSection(input, [
+      "[mcp_servers.agent-link]",
+      'url = "https://r/mcp"',
+      'bearer_token = "t"',
+    ]);
+    expect(result).toContain('approval_policy = "on-request"');
+    expect(result).toContain("[mcp_servers.agent-link]");
   });
 });
