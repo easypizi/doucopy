@@ -8,9 +8,9 @@ description: "Use when agent-link is misbehaving: a peer shows offline, ask_peer
 ## First, gather cheap signals
 
 ```bash
-make status                       # daemon state, pid, tail of both logs
-tail -n 100 ~/.agent-link/responder.log     ~/.agent-link/responder.err.log
-curl -fsS "$RELAY_URL/health"     # {"ok":true} means the relay is up
+agent-link status                       # daemon state, peers, dialogs
+agent-link logs -f                      # follow both stdout and stderr
+curl -fsS "$RELAY_URL/health"           # {"ok":true} means the relay is up
 ```
 
 `RELAY_URL` is in `~/.agent-link/config.json → relay_url`.
@@ -21,9 +21,9 @@ curl -fsS "$RELAY_URL/health"     # {"ok":true} means the relay is up
 
 A peer is online iff the relay saw its daemon long-poll `/inbox` in the last **60 seconds**.
 
-1. Daemon not running on that machine → `make status`, `make start`.
+1. Daemon not running on that machine → `agent-link status`, `agent-link start`.
 2. Daemon running but crashing on start → `~/.agent-link/responder.err.log` for stack traces. Common: invalid `config.json` (thrown by `daemon/src/config.ts` with a `config: ...` message).
-3. Auth error against the relay → the poller enters a 300s backoff (see `daemon/src/poller.ts:103-107`). Look for `401` in the err log. Fix: token in `config.json` must match `PEER_TOKEN_<NAME>` on the relay for the *same* peer name.
+3. Auth error against the relay → the poller enters a 300s backoff. Look for `401` in the err log. Fix: `RELAY_SECRET` on the relay was rotated, or the peer name is in `REVOKED_PEERS`. Re-join with a fresh invite.
 4. Relay down or sleeping → `curl /health`. If it 502s or times out, check Heroku. If the app is on `eco`, upgrade to `basic`.
 5. Corporate proxy / DNS blocking outbound HTTPS → the daemon retries with exponential backoff (1s → 60s cap). Check the err log for network errors.
 
@@ -47,10 +47,10 @@ There is no recovery; ask again.
 
 ### 401 / 403 from the MCP tool
 
-- `401 unauthorized` — asker's bearer token is wrong or missing from the MCP config in `~/.cursor/mcp.json`.
+- `401 unauthorized` — asker's bearer token in `~/.cursor/mcp.json` no longer verifies against `RELAY_SECRET` (rotation) or the peer is in `REVOKED_PEERS`. Fix by re-joining and updating `mcp.json`.
 - `403 wrong peer` — asker's token belongs to peer X but the request is for peer Y's inbox (only happens on the daemon side, not on `ask_peer`).
 
-Fix by re-checking `~/.cursor/mcp.json` and the relay's env vars. Restart Cursor after edits.
+Restart Cursor after edits to `mcp.json`.
 
 ### Empty answer (`{ status: "answered", answer: "" }`)
 
@@ -71,14 +71,14 @@ Read the `error` string. Common values:
 Most transient issues clear with:
 
 ```bash
-make restart      # kickstart the LaunchAgent, picks up new dist/ and config
+agent-link restart
 ```
 
 If the daemon won't stay up, run it in the foreground to see the failure interactively:
 
 ```bash
-make stop
-node daemon/dist/index.js
+agent-link stop
+node "$(npm root -g)/agent-link/daemon/dist/index.js"
 ```
 
 ## When to escalate to code changes

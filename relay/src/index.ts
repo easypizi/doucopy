@@ -1,21 +1,23 @@
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
-import { loadPeersFromEnv } from "./auth.js";
+import { pathToFileURL } from "node:url";
+import { createTokenService } from "./auth.js";
 import { Mailbox } from "./mailbox.js";
 import { buildMcpServer } from "./mcp.js";
 import { authPeer, registerRest } from "./rest.js";
 
 export function buildApp(env: NodeJS.ProcessEnv = process.env): FastifyInstance {
-  const registry = loadPeersFromEnv(env);
+  if (!env.RELAY_SECRET) throw new Error("RELAY_SECRET is required");
+  const tokens = createTokenService(env.RELAY_SECRET, env.REVOKED_PEERS);
   const mailbox = new Mailbox();
   const app = Fastify({ logger: true });
-  registerRest(app, mailbox, registry);
+  registerRest(app, mailbox, tokens);
 
   // Stateless streamable HTTP: a fresh server+transport pair per request.
   app.post("/mcp", async (req, reply) => {
-    const peer = authPeer(req, registry);
+    const peer = authPeer(req, tokens);
     if (!peer) return reply.code(401).send({ error: "unauthorized" });
-    const server = buildMcpServer(mailbox, registry, peer);
+    const server = buildMcpServer(mailbox, peer);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     reply.hijack();
     reply.raw.on("close", () => {
@@ -56,7 +58,8 @@ export function buildApp(env: NodeJS.ProcessEnv = process.env): FastifyInstance 
   return app;
 }
 
-const isMain = process.argv[1]?.endsWith("index.js") ?? false;
+const isMain =
+  process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url;
 if (isMain) {
   const app = buildApp();
   const port = Number(process.env.PORT ?? 3000);

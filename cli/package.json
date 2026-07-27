@@ -1,0 +1,6 @@
+{
+  "name": "cli",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "tsc" }
+}

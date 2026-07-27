@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildApp } from "../src/index.js";
 
 const ENV = {
-  PEER_TOKEN_PERSONAL: "tok-personal",
+  RELAY_SECRET: "e2e-secret-0123456789abcdef",
 } as NodeJS.ProcessEnv;
 
 describe("/mcp method handling", () => {

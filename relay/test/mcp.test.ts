@@ -2,19 +2,11 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it, vi } from "vitest";
-import { loadPeersFromEnv } from "../src/auth.js";
 import { Mailbox } from "../src/mailbox.js";
 import { buildMcpServer, type BuildMcpServerOptions } from "../src/mcp.js";
 
-function makeRegistry() {
-  return loadPeersFromEnv({
-    PEER_TOKEN_PERSONAL: "tok-personal",
-    PEER_TOKEN_WORK: "tok-work",
-  } as NodeJS.ProcessEnv);
-}
-
 async function connect(mailbox: Mailbox, fromPeer: string, options?: BuildMcpServerOptions) {
-  const server = buildMcpServer(mailbox, makeRegistry(), fromPeer, options);
+  const server = buildMcpServer(mailbox, fromPeer, options);
   const client = new Client({ name: "test-client", version: "0.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -46,13 +38,14 @@ describe("MCP tools", () => {
     expect(result.conversation_id).toBeTruthy();
   });
 
-  it("ask_peer rejects unknown peers", async () => {
+  it("ask_peer to a never-seen peer queues the question as peer_offline", async () => {
     const mailbox = new Mailbox();
     const client = await connect(mailbox, "personal");
     const result = payload(
       await client.callTool({ name: "ask_peer", arguments: { peer: "nobody", question: "hi" } }),
     );
-    expect(result.status).toBe("error");
+    expect(result.status).toBe("peer_offline");
+    expect(result.ticket_id).toBeTruthy();
   });
 
   it("ask_peer returns the answer once the daemon settles the ticket", async () => {

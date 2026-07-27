@@ -1,0 +1,14 @@
+{
+  "name": "agent-link relay",
+  "description": "Relay for agent-link: remote MCP server plus a mailbox for responder daemons",
+  "keywords": ["mcp", "agents", "cursor"],
+  "env": {
+    "RELAY_SECRET": {
+      "description": "HMAC secret that signs peer tokens and invites. Rotating it disconnects every peer.",
+      "generator": "secret"
+    }
+  },
+  "formation": {
+    "web": { "quantity": 1, "size": "basic" }
+  }
+}

@@ -80,8 +80,27 @@ describe("createHandler", () => {
     const createChatCalls = logLines.filter((line) => line === "create-chat");
     expect(createChatCalls).toHaveLength(2);
 
-    const taskMd = readFileSync(path.join(config.responder.workspace_dir, "task.md"), "utf8");
+    const taskMd = readFileSync(
+      path.join(config.responder.workspace_dir, "conv-1", "task.md"),
+      "utf8",
+    );
     expect(taskMd).toContain("Memory sources");
+  });
+
+  it("keeps two conversations in separate workspace directories", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-handler-"));
+    process.env.FAKE_AGENT_MODE = "ok";
+    const config = makeConfig(dir);
+    const store = new ConversationStore(path.join(dir, "conversations.json"));
+    const handler = createHandler(config, store, "test policy");
+    await handler(question({ conversation_id: "conv-a" }));
+    await handler(question({ conversation_id: "conv-b" }));
+    expect(
+      readFileSync(path.join(config.responder.workspace_dir, "conv-a", "task.md"), "utf8"),
+    ).toContain("Memory sources");
+    expect(
+      readFileSync(path.join(config.responder.workspace_dir, "conv-b", "task.md"), "utf8"),
+    ).toContain("Memory sources");
   });
 
   it("redacts configured literals and built-in secrets from the outgoing answer", async () => {

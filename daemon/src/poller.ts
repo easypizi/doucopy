@@ -6,10 +6,13 @@ export type QuestionHandler = (q: Question) => Promise<{ answer?: string; error?
 const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 60_000;
 const AUTH_BACKOFF_CAP_MS = 300_000;
+const DEFAULT_MAX_CONCURRENT = 3;
 
 export class Poller {
   private backoffMs = INITIAL_BACKOFF_MS;
   private readonly injectedSleep?: (ms: number) => Promise<void>;
+  private readonly maxConcurrent: number;
+  private readonly inFlight = new Set<Promise<void>>();
 
   constructor(
     private config: DaemonConfig,
@@ -18,9 +21,16 @@ export class Poller {
     sleep?: (ms: number) => Promise<void>,
   ) {
     this.injectedSleep = sleep;
+    this.maxConcurrent = config.responder.max_concurrent ?? DEFAULT_MAX_CONCURRENT;
   }
 
   async pollOnce(signal?: AbortSignal): Promise<"handled" | "empty" | "retry"> {
+    while (this.inFlight.size >= this.maxConcurrent) {
+      if (signal?.aborted) return "retry";
+      await Promise.race([...this.inFlight]);
+    }
+    if (signal?.aborted) return "retry";
+
     const headers = { authorization: `Bearer ${this.config.token}` };
     let res: Response;
     try {
@@ -46,58 +56,72 @@ export class Poller {
       await this.backoff(MAX_BACKOFF_MS, signal);
       return "retry";
     }
-    let question: Question | undefined;
+    let question: Question;
     try {
       question = (await res.json()) as Question;
-      const result = await this.handle(question);
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
-        try {
-          const answerRes = await this.fetchImpl(`${this.config.relay_url}/answer`, {
-            method: "POST",
-            headers: { ...headers, "content-type": "application/json" },
-            body: JSON.stringify({ ticket_id: question.ticket_id, ...result }),
-            signal,
-          });
-          if (answerRes.ok) {
-            this.backoffMs = INITIAL_BACKOFF_MS;
-            return "handled";
-          }
-          if (answerRes.status >= 400 && answerRes.status < 500) {
-            console.error(
-              `relay rejected answer for ticket ${question.ticket_id} (HTTP ${answerRes.status}), not retrying`,
-            );
-            await this.backoff(MAX_BACKOFF_MS, signal);
-            return "retry";
-          }
-        } catch {
-          if (signal?.aborted) return "retry";
-        }
-
-        if (attempt < 3) {
-          await this.wait(1000, signal);
-          if (signal?.aborted) return "retry";
-        }
-      }
-
-      console.error(`failed to deliver answer for ticket ${question.ticket_id}`);
-      await this.backoff(MAX_BACKOFF_MS, signal);
-      return "retry";
     } catch {
-      if (signal?.aborted) return "retry";
-      if (!question) {
-        console.error("failed to parse inbox response JSON");
-      } else {
-        console.error(`failed to handle question or deliver answer for ticket ${question.ticket_id}`);
-      }
+      console.error("failed to parse inbox response JSON");
       await this.backoff(MAX_BACKOFF_MS, signal);
       return "retry";
     }
+    this.backoffMs = INITIAL_BACKOFF_MS;
+    let job: Promise<void>;
+    job = this.handleAndDeliver(question, signal).finally(() => {
+      this.inFlight.delete(job);
+    });
+    this.inFlight.add(job);
+    return "handled";
   }
 
   async run(signal?: AbortSignal): Promise<void> {
     while (!signal?.aborted) {
       await this.pollOnce(signal);
     }
+    await this.drain();
+  }
+
+  async drain(): Promise<void> {
+    while (this.inFlight.size > 0) {
+      await Promise.allSettled([...this.inFlight]);
+    }
+  }
+
+  private async handleAndDeliver(question: Question, signal?: AbortSignal): Promise<void> {
+    const headers = {
+      authorization: `Bearer ${this.config.token}`,
+      "content-type": "application/json",
+    };
+    let result: { answer?: string; error?: string };
+    try {
+      result = await this.handle(question);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      result = { error: `handler crashed: ${message.slice(0, 500)}` };
+    }
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        const res = await this.fetchImpl(`${this.config.relay_url}/answer`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ ticket_id: question.ticket_id, ...result }),
+          signal,
+        });
+        if (res.ok) return;
+        if (res.status >= 400 && res.status < 500) {
+          console.error(
+            `relay rejected answer for ticket ${question.ticket_id} (HTTP ${res.status}), not retrying`,
+          );
+          return;
+        }
+      } catch {
+        if (signal?.aborted) return;
+      }
+      if (attempt < 3) {
+        await this.wait(1000, signal);
+        if (signal?.aborted) return;
+      }
+    }
+    console.error(`failed to deliver answer for ticket ${question.ticket_id}`);
   }
 
   private async backoff(capMs: number, signal?: AbortSignal): Promise<void> {

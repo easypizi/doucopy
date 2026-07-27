@@ -12,6 +12,7 @@ export interface DaemonConfig {
     cursor_agent_binary: string;
     workspace_dir: string;
     response_timeout_seconds: number;
+    max_concurrent?: number;
     model?: string;
   };
   redact?: Partial<RedactConfig>;
@@ -56,6 +57,12 @@ export function loadConfig(filePath = "~/.agent-link/config.json"): DaemonConfig
     config.responder.response_timeout_seconds <= 0
   ) {
     throw new Error("config: missing responder.response_timeout_seconds");
+  }
+  if (
+    config.responder.max_concurrent !== undefined &&
+    (!Number.isInteger(config.responder.max_concurrent) || config.responder.max_concurrent <= 0)
+  ) {
+    throw new Error("config: responder.max_concurrent must be a positive integer");
   }
   if (config.redact !== undefined) {
     if (typeof config.redact !== "object" || config.redact === null) {

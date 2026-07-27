@@ -1,6 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { PeerRegistry } from "./auth.js";
 import type { Mailbox } from "./mailbox.js";
 
 const KEEPALIVE_INTERVAL_MS = 15_000;
@@ -17,13 +16,12 @@ export interface BuildMcpServerOptions {
 
 export function buildMcpServer(
   mailbox: Mailbox,
-  registry: PeerRegistry,
   fromPeer: string,
   options?: BuildMcpServerOptions,
 ): McpServer {
   const keepaliveIntervalMs = options?.keepaliveIntervalMs ?? KEEPALIVE_INTERVAL_MS;
   const server = new McpServer(
-    { name: "agent-link", version: "0.1.0" },
+    { name: "agent-link", version: "2.0.0" },
     { capabilities: { logging: {} } },
   );
 
@@ -35,8 +33,8 @@ export function buildMcpServer(
     },
     async () =>
       json(
-        registry
-          .peers()
+        mailbox
+          .knownPeers()
           .filter((name) => name !== fromPeer)
           .map((name) => ({ name, online: mailbox.isOnline(name) })),
       ),
@@ -48,7 +46,8 @@ export function buildMcpServer(
       description:
         "Ask another account's agent a question. It answers from its own memory (chat history, notes). " +
         "Pass conversation_id from a previous result to continue the same conversation. " +
-        "If status is pending or peer_offline, fetch the answer later with check_reply.",
+        "If status is pending or peer_offline, fetch the answer later with check_reply. " +
+        "Peers that are offline or unknown still get the question queued for 24 hours.",
       inputSchema: {
         peer: z.string().describe("Peer name from list_peers"),
         question: z.string(),
@@ -57,8 +56,8 @@ export function buildMcpServer(
       },
     },
     async ({ peer, question, timeout_seconds, conversation_id }, extra) => {
-      if (peer === fromPeer || !registry.peers().includes(peer)) {
-        return json({ status: "error", error: `unknown peer: ${peer}` });
+      if (peer === fromPeer) {
+        return json({ status: "error", error: "cannot ask yourself" });
       }
       const { ticket_id, conversation_id: convId } = mailbox.enqueue(
         peer,

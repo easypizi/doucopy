@@ -6,6 +6,7 @@ import type { QuestionHandler } from "./poller.js";
 import { buildFirstTask, buildFollowupTask, type MemoryMap } from "./prompt.js";
 import { applyRedactions, compileRedactRules } from "./redact.js";
 import { createChat, runTask, type RunnerOptions } from "./runner.js";
+import { safeDirName } from "./workspace.js";
 
 function collectMemory(config: DaemonConfig): MemoryMap {
   const transcript_files = fg.sync(config.memory_sources.transcripts_glob, { absolute: true });
@@ -20,7 +21,7 @@ export function createHandler(
   store: ConversationStore,
   policy: string,
 ): QuestionHandler {
-  const runnerOpts: RunnerOptions = {
+  const baseRunnerOpts: RunnerOptions = {
     binary: config.responder.cursor_agent_binary,
     workspaceDir: config.responder.workspace_dir,
     timeoutMs: config.responder.response_timeout_seconds * 1000,
@@ -46,6 +47,13 @@ export function createHandler(
   };
 
   return async (question) => {
+    const runnerOpts: RunnerOptions = {
+      ...baseRunnerOpts,
+      workspaceDir: path.join(
+        config.responder.workspace_dir,
+        safeDirName(question.conversation_id),
+      ),
+    };
     try {
       let chatId = store.get(question.conversation_id);
       const isFirstTurn = chatId === null;

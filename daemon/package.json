@@ -5,8 +5,5 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js"
-  },
-  "dependencies": {
-    "fast-glob": "^3.3.3"
   }
 }

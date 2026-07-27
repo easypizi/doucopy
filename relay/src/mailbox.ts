@@ -14,11 +14,20 @@ export type ReplyStatus =
 
 interface PendingEntry {
   peer: string;
+  from: string;
+  created_at: number;
   deadline: number;
   answer?: string;
   error?: string;
   settled: boolean;
   settleListeners: Set<() => void>;
+}
+
+export interface OutgoingTicket {
+  ticket_id: string;
+  to_peer: string;
+  status: "pending" | "answered" | "error";
+  created_at: number;
 }
 
 interface Waiter {
@@ -53,6 +62,8 @@ export class Mailbox {
     };
     this.pending.set(ticket_id, {
       peer: toPeer,
+      from: fromPeer,
+      created_at: now,
       deadline: item.deadline,
       settled: false,
       settleListeners: new Set(),
@@ -151,6 +162,25 @@ export class Mailbox {
   isOnline(peer: string): boolean {
     const seen = this.lastSeen.get(peer);
     return seen !== undefined && Date.now() - seen < ONLINE_WINDOW_MS;
+  }
+
+  knownPeers(): string[] {
+    return [...this.lastSeen.keys()];
+  }
+
+  queuedCount(peer: string): number {
+    return this.inbox.get(peer)?.length ?? 0;
+  }
+
+  outgoingFor(peer: string): OutgoingTicket[] {
+    this.cleanup();
+    const result: OutgoingTicket[] = [];
+    for (const [ticket_id, entry] of this.pending) {
+      if (entry.from !== peer) continue;
+      const status = !entry.settled ? "pending" : entry.error !== undefined ? "error" : "answered";
+      result.push({ ticket_id, to_peer: entry.peer, status, created_at: entry.created_at });
+    }
+    return result.sort((a, b) => a.created_at - b.created_at);
   }
 
   // Answers are single-read: consuming removes the entry to bound memory.

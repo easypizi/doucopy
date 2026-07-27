@@ -3,9 +3,12 @@ import { expandHome, loadConfig } from "./config.js";
 import { ConversationStore } from "./conversations.js";
 import { createHandler } from "./handler.js";
 import { Poller } from "./poller.js";
+import { pruneWorkspaces } from "./workspace.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  const pruned = pruneWorkspaces(config.responder.workspace_dir);
+  if (pruned > 0) console.log(`pruned ${pruned} stale conversation workspace(s)`);
   const policyPath = expandHome("~/.agent-link/policy.md");
   const policy = existsSync(policyPath) ? readFileSync(policyPath, "utf8") : "";
   const store = new ConversationStore(expandHome("~/.agent-link/conversations.json"));

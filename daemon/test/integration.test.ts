@@ -1,10 +1,11 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createTokenService } from "../../relay/src/auth.js";
 import { buildApp } from "../../relay/src/index.js";
 import type { DaemonConfig } from "../src/config.js";
 import { ConversationStore } from "../src/conversations.js";
@@ -34,10 +35,11 @@ async function waitForPeerOnline(client: Client, peerName: string, timeoutMs = 2
 }
 
 describe("full cycle: MCP ask_peer -> daemon -> answer", () => {
-  const app = buildApp({
-    PEER_TOKEN_PERSONAL: "tok-personal",
-    PEER_TOKEN_WORK: "tok-work",
-  } as NodeJS.ProcessEnv);
+  const SECRET = "e2e-secret-0123456789abcdef";
+  const tokens = createTokenService(SECRET);
+  const personalToken = tokens.issuePeerToken("personal");
+  const workToken = tokens.issuePeerToken("work");
+  const app = buildApp({ RELAY_SECRET: SECRET } as NodeJS.ProcessEnv);
   let baseUrl: string;
   let pollerRunPromise: Promise<void>;
   let logFile: string;
@@ -58,7 +60,7 @@ describe("full cycle: MCP ask_peer -> daemon -> answer", () => {
     const config: DaemonConfig = {
       relay_url: baseUrl,
       self_peer: "work",
-      token: "tok-work",
+      token: workToken,
       memory_sources: {
         transcripts_glob: path.join(dir, "none/*.jsonl"),
         agents_md_roots: [],
@@ -85,7 +87,7 @@ describe("full cycle: MCP ask_peer -> daemon -> answer", () => {
 
   it("answers a question end to end and keeps the conversation id", async () => {
     const transport = new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`), {
-      requestInit: { headers: { authorization: "Bearer tok-personal" } },
+      requestInit: { headers: { authorization: `Bearer ${personalToken}` } },
     });
     const client = new Client({ name: "e2e", version: "0.0.0" });
     await client.connect(transport);
@@ -125,7 +127,9 @@ describe("full cycle: MCP ask_peer -> daemon -> answer", () => {
       expect(resumeIndexes).toHaveLength(2);
       for (const i of resumeIndexes) expect(logLines[i + 1]).toBe("chat-123");
 
-      const taskMd = readFileSync(path.join(workspaceDir, "task.md"), "utf8");
+      const convDirs = readdirSync(workspaceDir);
+      expect(convDirs.length).toBeGreaterThan(0);
+      const taskMd = readFileSync(path.join(workspaceDir, convDirs[0], "task.md"), "utf8");
       expect(taskMd).not.toContain("Memory sources");
     } finally {
       await client.close();

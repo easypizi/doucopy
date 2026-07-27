@@ -153,4 +153,38 @@ describe("Mailbox", () => {
     vi.advanceTimersByTime(61_000);
     expect(box.isOnline("work")).toBe(false);
   });
+
+  it("tracks known peers from polling", async () => {
+    const box = new Mailbox();
+    expect(box.knownPeers()).toEqual([]);
+    const poll = box.takeNext("work", 100);
+    vi.advanceTimersByTime(101);
+    await poll;
+    expect(box.knownPeers()).toEqual(["work"]);
+  });
+
+  it("counts queued questions per peer", () => {
+    const box = new Mailbox();
+    expect(box.queuedCount("work")).toBe(0);
+    box.enqueue("work", "personal", "q1");
+    box.enqueue("work", "personal", "q2");
+    expect(box.queuedCount("work")).toBe(2);
+    expect(box.queuedCount("personal")).toBe(0);
+  });
+
+  it("lists outgoing tickets with statuses for the asking peer", () => {
+    const box = new Mailbox();
+    const a = box.enqueue("work", "personal", "q1");
+    const b = box.enqueue("work", "personal", "q2");
+    const c = box.enqueue("work", "personal", "q3");
+    box.settle(b.ticket_id, { answer: "42" });
+    box.settle(c.ticket_id, { error: "boom" });
+    const out = box.outgoingFor("personal");
+    expect(out.map((t) => [t.ticket_id, t.to_peer, t.status])).toEqual([
+      [a.ticket_id, "work", "pending"],
+      [b.ticket_id, "work", "answered"],
+      [c.ticket_id, "work", "error"],
+    ]);
+    expect(box.outgoingFor("work")).toEqual([]);
+  });
 });

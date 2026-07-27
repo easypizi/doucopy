@@ -37,6 +37,7 @@ describe("Poller", () => {
     const handle = vi.fn(async () => ({ answer: "42" }));
     const poller = new Poller(CONFIG, handle, fetchImpl, async () => undefined);
     await expect(poller.pollOnce()).resolves.toBe("handled");
+    await poller.drain();
 
     expect(handle).toHaveBeenCalledWith(QUESTION);
     expect(calls[0].url).toBe("https://relay.test/inbox/work?wait=25");
@@ -45,27 +46,42 @@ describe("Poller", () => {
     expect(JSON.parse(String(calls[1].init?.body))).toEqual({ ticket_id: "t-1", answer: "42" });
   });
 
-  it("returns retry when the handler throws", async () => {
-    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(QUESTION), { status: 200 })) as unknown as typeof fetch;
+  it("delivers an error payload when the handler throws", async () => {
+    const posted: string[] = [];
+    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      if (String(url).includes("/inbox/")) {
+        return new Response(JSON.stringify(QUESTION), { status: 200 });
+      }
+      posted.push(String(init?.body ?? ""));
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as unknown as typeof fetch;
     const handle = vi.fn(async () => {
       throw new Error("handler failed");
     });
     const poller = new Poller(CONFIG, handle, fetchImpl, async () => undefined);
 
-    await expect(poller.pollOnce()).resolves.toBe("retry");
+    await expect(poller.pollOnce()).resolves.toBe("handled");
+    await poller.drain();
+    expect(posted).toHaveLength(1);
+    const body = JSON.parse(posted[0]) as { ticket_id: string; error?: string };
+    expect(body.ticket_id).toBe("t-1");
+    expect(body.error).toMatch(/handler crashed: handler failed/);
   });
 
-  it("returns retry after three failed answer deliveries", async () => {
+  it("retries the answer delivery three times before giving up", async () => {
+    let postAttempts = 0;
     const fetchImpl = vi.fn(async (url: string | URL) => {
       if (String(url).includes("/inbox/")) {
         return new Response(JSON.stringify(QUESTION), { status: 200 });
       }
+      postAttempts += 1;
       return new Response(null, { status: 500 });
     }) as unknown as typeof fetch;
     const poller = new Poller(CONFIG, vi.fn(async () => ({ answer: "42" })), fetchImpl, async () => undefined);
 
-    await expect(poller.pollOnce()).resolves.toBe("retry");
-    expect(fetchImpl).toHaveBeenCalledTimes(4);
+    await expect(poller.pollOnce()).resolves.toBe("handled");
+    await poller.drain();
+    expect(postAttempts).toBe(3);
   });
 
   it("stops retrying after a 404 on the answer POST (permanent failure)", async () => {
@@ -79,12 +95,12 @@ describe("Poller", () => {
     }) as unknown as typeof fetch;
     const poller = new Poller(CONFIG, vi.fn(async () => ({ answer: "42" })), fetchImpl, async () => undefined);
 
-    await expect(poller.pollOnce()).resolves.toBe("retry");
+    await expect(poller.pollOnce()).resolves.toBe("handled");
+    await poller.drain();
     expect(postAttempts).toBe(1);
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("handles a question when answer delivery succeeds on the third attempt", async () => {
+  it("succeeds when answer delivery works on the third attempt", async () => {
     let postAttempts = 0;
     const fetchImpl = vi.fn(async (url: string | URL) => {
       if (String(url).includes("/inbox/")) {
@@ -96,7 +112,8 @@ describe("Poller", () => {
     const poller = new Poller(CONFIG, vi.fn(async () => ({ answer: "42" })), fetchImpl, async () => undefined);
 
     await expect(poller.pollOnce()).resolves.toBe("handled");
-    expect(fetchImpl).toHaveBeenCalledTimes(4);
+    await poller.drain();
+    expect(postAttempts).toBe(3);
   });
 
   it("returns empty on 204 without calling the handler", async () => {
@@ -185,5 +202,53 @@ describe("Poller", () => {
 
     await expect(runPromise).resolves.toBeUndefined();
     expect(signals).toEqual([controller.signal]);
+  });
+
+  it("handles up to max_concurrent questions in parallel and then blocks", async () => {
+    const config = {
+      ...CONFIG,
+      responder: { ...CONFIG.responder, max_concurrent: 2 },
+    };
+    let questionNo = 0;
+    const fetchImpl = vi.fn(async (url: string | URL) => {
+      if (String(url).includes("/inbox/")) {
+        questionNo += 1;
+        return new Response(
+          JSON.stringify({ ...QUESTION, ticket_id: `t-${questionNo}`, conversation_id: `c-${questionNo}` }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const resolvers: Array<() => void> = [];
+    const handle = vi.fn(
+      () =>
+        new Promise<{ answer?: string }>((resolve) => {
+          resolvers.push(() => resolve({ answer: "ok" }));
+        }),
+    );
+    const poller = new Poller(config, handle, fetchImpl, async () => undefined);
+
+    await expect(poller.pollOnce()).resolves.toBe("handled");
+    await expect(poller.pollOnce()).resolves.toBe("handled");
+    expect(handle).toHaveBeenCalledTimes(2);
+
+    let thirdSettled = false;
+    const third = poller.pollOnce().then((r) => {
+      thirdSettled = true;
+      return r;
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(thirdSettled).toBe(false);
+    expect(handle).toHaveBeenCalledTimes(2);
+
+    resolvers[0]();
+    await expect(third).resolves.toBe("handled");
+    expect(handle).toHaveBeenCalledTimes(3);
+
+    resolvers[1]();
+    resolvers[2]();
+    await poller.drain();
   });
 });
