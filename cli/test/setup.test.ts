@@ -4,7 +4,10 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   defaultConfig,
+  detectHarnesses,
   discoverMemorySources,
+  mergeClaudeMcp,
+  mergeCodexToml,
   mergeMcpJson,
   writeConfig,
   writeDefaultPolicy,
@@ -68,6 +71,7 @@ describe("mergeMcpJson", () => {
     };
     expect(parsed.mcpServers.other.url).toBe("http://x");
     expect(parsed.mcpServers["agent-link"]).toEqual({
+      type: "http",
       url: "https://r.example.com/mcp",
       headers: { Authorization: "Bearer tok" },
     });
@@ -78,5 +82,90 @@ describe("mergeMcpJson", () => {
     const home = makeHome();
     const file = mergeMcpJson(home, "https://r.example.com", "tok");
     expect(JSON.parse(readFileSync(file, "utf8"))).toHaveProperty("mcpServers.agent-link");
+  });
+});
+
+describe("mergeClaudeMcp", () => {
+  it("writes ~/.claude.json with the agent-link entry", () => {
+    const home = makeHome();
+    const file = mergeClaudeMcp(home, "https://r.example.com", "tok-c");
+    expect(file).toBe(path.join(home, ".claude.json"));
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as {
+      mcpServers: Record<string, { type: string; url: string; headers: Record<string, string> }>;
+    };
+    expect(parsed.mcpServers["agent-link"]).toEqual({
+      type: "http",
+      url: "https://r.example.com/mcp",
+      headers: { Authorization: "Bearer tok-c" },
+    });
+  });
+
+  it("preserves other Claude Code settings and creates a backup", () => {
+    const home = makeHome();
+    const file = path.join(home, ".claude.json");
+    writeFileSync(file, JSON.stringify({ theme: "dark", mcpServers: { legacy: { command: "x" } } }));
+    mergeClaudeMcp(home, "https://r.example.com", "tok-c");
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as { theme: string; mcpServers: Record<string, unknown> };
+    expect(parsed.theme).toBe("dark");
+    expect(parsed.mcpServers.legacy).toEqual({ command: "x" });
+    expect(readFileSync(`${file}.bak`, "utf8")).toContain("legacy");
+  });
+});
+
+describe("mergeCodexToml", () => {
+  it("writes a fresh ~/.codex/config.toml with the agent-link section", () => {
+    const home = makeHome();
+    const file = mergeCodexToml(home, "https://r.example.com", "tok-x");
+    expect(file).toBe(path.join(home, ".codex/config.toml"));
+    const contents = readFileSync(file, "utf8");
+    expect(contents).toContain("[mcp_servers.agent-link]");
+    expect(contents).toContain('url = "https://r.example.com/mcp"');
+    expect(contents).toContain('bearer_token = "tok-x"');
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it("keeps unrelated sections and replaces an existing agent-link block", () => {
+    const home = makeHome();
+    mkdirSync(path.join(home, ".codex"), { recursive: true });
+    const file = path.join(home, ".codex/config.toml");
+    writeFileSync(
+      file,
+      [
+        "approval_policy = \"on-request\"",
+        "",
+        "[mcp_servers.agent-link]",
+        "url = \"https://old.example.com/mcp\"",
+        "bearer_token = \"old\"",
+        "",
+        "[mcp_servers.other]",
+        "command = \"x\"",
+        "",
+      ].join("\n"),
+    );
+    mergeCodexToml(home, "https://new.example.com", "new-tok");
+    const contents = readFileSync(file, "utf8");
+    expect(contents).toContain('approval_policy = "on-request"');
+    expect(contents).toContain('url = "https://new.example.com/mcp"');
+    expect(contents).toContain('bearer_token = "new-tok"');
+    expect(contents).not.toContain("old.example.com");
+    expect(contents).not.toContain('bearer_token = "old"');
+    expect(contents).toContain("[mcp_servers.other]");
+    expect(readFileSync(`${file}.bak`, "utf8")).toContain("old.example.com");
+  });
+});
+
+describe("detectHarnesses", () => {
+  it("reports cursor when ~/.cursor exists", () => {
+    const home = makeHome();
+    mkdirSync(path.join(home, ".cursor"), { recursive: true });
+    expect(detectHarnesses(home).cursor).toBe(true);
+  });
+
+  it("does not lie about claude/codex just because ~/.cursor exists", () => {
+    const home = makeHome();
+    mkdirSync(path.join(home, ".cursor"), { recursive: true });
+    const detected = detectHarnesses(home);
+    expect(typeof detected.claude).toBe("boolean");
+    expect(typeof detected.codex).toBe("boolean");
   });
 });

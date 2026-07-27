@@ -3,10 +3,19 @@ import { isDaemonRunning } from "./launchd.js";
 
 export async function runStatus(): Promise<void> {
   const { loadConfig } = await import("../../daemon/dist/config.js");
+  const { listPaused } = await import("../../daemon/dist/paused.js");
   const config = loadConfig();
   console.log(`relay: ${config.relay_url}`);
   console.log(`self:  ${config.self_peer}`);
   console.log(`daemon process: ${isDaemonRunning() ? "running" : "stopped"}`);
+  const paused = listPaused();
+  if (paused.length > 0) {
+    console.log("paused peers:");
+    for (const p of paused) {
+      const until = p.until_ms === null ? "indefinitely" : `until ${new Date(p.until_ms).toISOString()}`;
+      console.log(`  - ${p.peer} (${until})`);
+    }
+  }
   try {
     const status = await fetchStatus(config.relay_url, config.token);
     console.log(`daemon connected: ${status.self_online ? "yes" : "no"}`);

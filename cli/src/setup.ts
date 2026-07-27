@@ -1,4 +1,5 @@
 import fg from "fast-glob";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -86,8 +87,29 @@ export function writeDefaultPolicy(home: string): boolean {
   return true;
 }
 
-export function mergeMcpJson(home: string, relayUrl: string, token: string): string {
-  const file = path.join(home, ".cursor", "mcp.json");
+export type HarnessKind = "cursor-agent" | "claude" | "codex";
+
+export interface DetectedHarnesses {
+  cursor: boolean;
+  claude: boolean;
+  codex: boolean;
+}
+
+export function detectHarnesses(home: string): DetectedHarnesses {
+  const cursor = existsSync(path.join(home, ".cursor")) || which("cursor-agent");
+  return {
+    cursor,
+    claude: which("claude"),
+    codex: which("codex"),
+  };
+}
+
+function which(binary: string): boolean {
+  const res = spawnSync("command", ["-v", binary], { shell: "/bin/bash", stdio: "ignore" });
+  return res.status === 0;
+}
+
+function writeMcpJson(file: string, relayUrl: string, token: string): void {
   mkdirSync(path.dirname(file), { recursive: true });
   let data: { mcpServers?: Record<string, unknown> } = {};
   if (existsSync(file)) {
@@ -101,9 +123,49 @@ export function mergeMcpJson(home: string, relayUrl: string, token: string): str
   }
   if (!data.mcpServers || typeof data.mcpServers !== "object") data.mcpServers = {};
   data.mcpServers["agent-link"] = {
+    type: "http",
     url: `${relayUrl.replace(/\/+$/, "")}/mcp`,
     headers: { Authorization: `Bearer ${token}` },
   };
   writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
+}
+
+export function mergeMcpJson(home: string, relayUrl: string, token: string): string {
+  const file = path.join(home, ".cursor", "mcp.json");
+  writeMcpJson(file, relayUrl, token);
+  return file;
+}
+
+export function mergeClaudeMcp(home: string, relayUrl: string, token: string): string {
+  const file = path.join(home, ".claude.json");
+  writeMcpJson(file, relayUrl, token);
+  return file;
+}
+
+// Merges the [mcp_servers.agent-link] block into ~/.codex/config.toml,
+// backing up the previous file to config.toml.bak. We do not depend on a
+// TOML library: the block has a fixed shape and we regex-replace the whole
+// section, preserving everything else verbatim.
+export function mergeCodexToml(home: string, relayUrl: string, token: string): string {
+  const dir = path.join(home, ".codex");
+  const file = path.join(dir, "config.toml");
+  mkdirSync(dir, { recursive: true });
+  const url = `${relayUrl.replace(/\/+$/, "")}/mcp`;
+  const block = [
+    "[mcp_servers.agent-link]",
+    `url = "${url}"`,
+    `bearer_token = "${token}"`,
+    "",
+  ].join("\n");
+  let existing = "";
+  if (existsSync(file)) {
+    existing = readFileSync(file, "utf8");
+    writeFileSync(`${file}.bak`, existing);
+  }
+  const sectionRe = /\[mcp_servers\.agent-link\][^\[]*(?=\n\[|\n?$)/;
+  const next = sectionRe.test(existing)
+    ? existing.replace(sectionRe, block.trimEnd())
+    : (existing.trimEnd() ? `${existing.trimEnd()}\n\n${block}` : block);
+  writeFileSync(file, next.endsWith("\n") ? next : `${next}\n`, { mode: 0o600 });
   return file;
 }
