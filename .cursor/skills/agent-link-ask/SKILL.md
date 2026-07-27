@@ -46,3 +46,12 @@ If your current working directory is `~/.agent-link/workspace`, you are the **re
 ## Costs
 
 The responding machine pays for its own `cursor-agent` tokens on every question. Don't ask idly.
+
+## Counter-questions from the responder
+
+Since v2.1 the responder may fire back a clarifying question at you via `ask_peer` with `hops=1` and the same `conversation_id`. Your local daemon answers it from **your** memory sources, not from a live chat. So:
+
+- Keep your own transcripts and AGENTS.md in `~/.agent-link/config.json`, otherwise the counter-question will get a useless answer.
+- Depth is capped: `hops` can only be 0 (initial) or 1 (counter). No infinite ping-pong.
+- Each conversation is capped at 4 open tickets simultaneously (relay returns `too many open tickets` if you spam it).
+- The counter-question cycle eats into your `timeout_seconds` budget. If you set 120s and the counter-question itself waits 60s, you have 60s left for the final answer. Increase `timeout_seconds` to 240s if you expect a counter-question.

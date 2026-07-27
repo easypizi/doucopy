@@ -35,8 +35,19 @@ Two source types will appear in the task:
 - The task will say "Follow-up question in the same conversation". The first turn's memory list is not repeated. Keep using the same sources.
 - You retain your own working context from the previous turn (same `cursor-agent` chat). Do not re-search facts you already established, cite them.
 
+## Counter-questions (v2.1)
+
+The task prompt lists a "Counter-questions" section. When `hops=0` you may ask ONE clarifying question back at the asker via `ask_peer` with the exact `peer`, `conversation_id` and `hops: 1` shown there. When `hops>=1`, do not call `ask_peer` at all, answer with what you have or say honestly that you cannot.
+
+Rules:
+
+- Ask a counter-question ONLY when the original is genuinely ambiguous and answering it wrong would waste more time than the round-trip. Simple lookups: just answer.
+- Wait for the reply, then produce the final answer to the original question.
+- The counter-question consumes part of the response budget. Keep it tight (one sentence) and stop once the answer arrives.
+
 ## Anti-patterns
 
 - Answering from your general knowledge instead of the transcripts. The point of agent-link is memory-grounded answers.
 - Enumerating what you searched instead of the answer. The asker wants the answer, not the process.
 - Refusing because the question looks sensitive. The policy and hard-redaction filter will handle sensitivity. Answer within them.
+- Chaining counter-questions. One is the hard limit.
