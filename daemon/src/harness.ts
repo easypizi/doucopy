@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { v7 as uuidv7 } from "uuid";
 import { createChat as cursorCreateChat, runTask as cursorRunTask, type RunnerOptions } from "./runner.js";
@@ -10,10 +10,16 @@ export interface HarnessOptions extends RunnerOptions {
   extraArgs?: string[];
 }
 
+export interface HarnessResult {
+  answer?: string;
+  error?: string;
+  sessionId?: string;
+}
+
 export interface Harness {
   readonly kind: HarnessKind;
-  createSession(opts: HarnessOptions): Promise<string>;
-  runTask(opts: HarnessOptions, sessionId: string, task: string): Promise<{ answer?: string; error?: string }>;
+  runFirstTask(opts: HarnessOptions, task: string): Promise<HarnessResult>;
+  runFollowupTask(opts: HarnessOptions, sessionId: string, task: string): Promise<HarnessResult>;
 }
 
 const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
@@ -44,10 +50,15 @@ interface SpawnRunOptions {
   labelForError: string;
 }
 
+interface SpawnRunResult {
+  answer?: string;
+  error?: string;
+}
+
 // Generic "run to completion, capture stdout, kill on timeout" driver used by
 // the Claude and Codex harnesses. Cursor keeps its own path in runner.ts
 // because of the grandchild-pipe workaround.
-function spawnAndCapture(opts: SpawnRunOptions): Promise<{ answer?: string; error?: string }> {
+function spawnAndCapture(opts: SpawnRunOptions): Promise<SpawnRunResult> {
   return new Promise((resolve) => {
     const proc = spawn(opts.cmd, opts.args, {
       cwd: opts.cwd,
@@ -58,7 +69,7 @@ function spawnAndCapture(opts: SpawnRunOptions): Promise<{ answer?: string; erro
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const settle = (result: { answer?: string; error?: string }) => {
+    const settle = (result: SpawnRunResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -94,28 +105,55 @@ function spawnAndCapture(opts: SpawnRunOptions): Promise<{ answer?: string; erro
 
 class CursorHarness implements Harness {
   readonly kind: HarnessKind = "cursor-agent";
-  createSession(opts: HarnessOptions): Promise<string> {
-    return cursorCreateChat(opts);
+  async runFirstTask(opts: HarnessOptions, task: string): Promise<HarnessResult> {
+    let sessionId: string;
+    try {
+      sessionId = await cursorCreateChat(opts);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { error: `cursor-agent failed: ${message.slice(0, 500)}` };
+    }
+    const result = await cursorRunTask(opts, sessionId, task);
+    return { ...result, sessionId: result.answer !== undefined ? sessionId : undefined };
   }
-  runTask(opts: HarnessOptions, sessionId: string, task: string): Promise<{ answer?: string; error?: string }> {
-    return cursorRunTask(opts, sessionId, task);
+  async runFollowupTask(opts: HarnessOptions, sessionId: string, task: string): Promise<HarnessResult> {
+    const result = await cursorRunTask(opts, sessionId, task);
+    return result;
   }
 }
 
+// Claude Code accepts an externally-supplied uuid via --session-id ONLY on
+// session creation. Subsequent invocations for the same session must use
+// --resume, so we branch first vs follow-up here.
 class ClaudeHarness implements Harness {
   readonly kind: HarnessKind = "claude";
-  // Claude accepts an externally supplied uuid via --session-id, so we can
-  // skip a warmup call entirely and jump straight into the first --resume turn.
-  async createSession(_opts: HarnessOptions): Promise<string> {
-    return uuidv7();
-  }
-  runTask(opts: HarnessOptions, sessionId: string, task: string): Promise<{ answer?: string; error?: string }> {
+  async runFirstTask(opts: HarnessOptions, task: string): Promise<HarnessResult> {
+    const sessionId = uuidv7();
     writeTaskFile(opts.workspaceDir, task);
     const args = [
       "-p",
       "Read the file task.md in this workspace and follow the instructions in it.",
       "--output-format", "text",
       "--session-id", sessionId,
+      ...(opts.model ? ["--model", opts.model] : []),
+      ...(opts.extraArgs ?? []),
+    ];
+    const result = await spawnAndCapture({
+      cmd: opts.binary,
+      args,
+      cwd: opts.workspaceDir,
+      timeoutMs: opts.timeoutMs,
+      labelForError: "claude",
+    });
+    return { ...result, sessionId: result.answer !== undefined ? sessionId : undefined };
+  }
+  async runFollowupTask(opts: HarnessOptions, sessionId: string, task: string): Promise<HarnessResult> {
+    writeTaskFile(opts.workspaceDir, task);
+    const args = [
+      "-p",
+      "Read the file task.md in this workspace and follow the instructions in it.",
+      "--output-format", "text",
+      "--resume", sessionId,
       ...(opts.model ? ["--model", opts.model] : []),
       ...(opts.extraArgs ?? []),
     ];
@@ -129,16 +167,49 @@ class ClaudeHarness implements Harness {
   }
 }
 
+// Codex has no "create empty session" call. The first turn is a plain
+// `codex exec`; the session id appears afterwards in $CODEX_HOME/sessions
+// as the last component of the rollout filename. We isolate CODEX_HOME per
+// workspace so parallel dialogs don't clobber each other.
 class CodexHarness implements Harness {
   readonly kind: HarnessKind = "codex";
-  // Codex has no "create empty session" call; the session appears after the
-  // first exec. We emit a stable session id ourselves and pass it via
-  // CODEX_SESSION_ID (Codex 0.75+ honours it) so both turns use the same id.
-  async createSession(_opts: HarnessOptions): Promise<string> {
-    return uuidv7();
+
+  private codexHome(workspaceDir: string): string {
+    return path.join(workspaceDir, ".codex-home");
   }
-  runTask(opts: HarnessOptions, sessionId: string, task: string): Promise<{ answer?: string; error?: string }> {
+
+  async runFirstTask(opts: HarnessOptions, task: string): Promise<HarnessResult> {
     writeTaskFile(opts.workspaceDir, task);
+    const codexHome = this.codexHome(opts.workspaceDir);
+    mkdirSync(codexHome, { recursive: true });
+    const args = [
+      "exec",
+      "--skip-git-repo-check",
+      "--sandbox", "workspace-write",
+      ...(opts.model ? ["--model", opts.model] : []),
+      ...(opts.extraArgs ?? []),
+      "Read the file task.md in this workspace and follow the instructions in it.",
+    ];
+    const result = await spawnAndCapture({
+      cmd: opts.binary,
+      args,
+      cwd: opts.workspaceDir,
+      env: { ...process.env, CODEX_HOME: codexHome },
+      timeoutMs: opts.timeoutMs,
+      labelForError: "codex",
+    });
+    if (result.error !== undefined || result.answer === undefined) return result;
+    const sessionId = findLatestCodexSessionId(codexHome);
+    if (!sessionId) {
+      return { error: "codex failed: could not locate session rollout in CODEX_HOME" };
+    }
+    return { ...result, sessionId };
+  }
+
+  runFollowupTask(opts: HarnessOptions, sessionId: string, task: string): Promise<HarnessResult> {
+    writeTaskFile(opts.workspaceDir, task);
+    const codexHome = this.codexHome(opts.workspaceDir);
+    mkdirSync(codexHome, { recursive: true });
     const args = [
       "exec", "resume", sessionId,
       "--skip-git-repo-check",
@@ -151,11 +222,46 @@ class CodexHarness implements Harness {
       cmd: opts.binary,
       args,
       cwd: opts.workspaceDir,
-      env: { ...process.env, CODEX_SESSION_ID: sessionId },
+      env: { ...process.env, CODEX_HOME: codexHome },
       timeoutMs: opts.timeoutMs,
       labelForError: "codex",
     });
   }
+}
+
+const CODEX_ROLLOUT_RE = /rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
+
+// Walk $CODEX_HOME/sessions recursively, pick the newest rollout-*.jsonl by
+// mtime, extract the trailing uuid. Codex organises sessions under date-based
+// subdirectories so we cannot glob a single level.
+export function findLatestCodexSessionId(codexHome: string): string | null {
+  const root = path.join(codexHome, "sessions");
+  const state: { best: { mtimeMs: number; id: string } | null } = { best: null };
+  const walk = (dir: string) => {
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const match = entry.name.match(CODEX_ROLLOUT_RE);
+      if (!match) continue;
+      let mtimeMs = 0;
+      try { mtimeMs = statSync(full).mtimeMs; } catch { continue; }
+      if (!state.best || mtimeMs > state.best.mtimeMs) {
+        state.best = { mtimeMs, id: match[1] };
+      }
+    }
+  };
+  walk(root);
+  return state.best ? state.best.id : null;
 }
 
 export function createHarness(kind: HarnessKind): Harness {

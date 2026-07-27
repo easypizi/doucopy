@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Test stub for claude. Logs args to FAKE_CLAUDE_LOG, prints STUB ANSWER.
+# Test stub for claude. Logs args to FAKE_CLAUDE_LOG (with a "---" separator per
+# invocation), then prints STUB ANSWER (or FAKE_CLAUDE_ANSWER).
 if [ -n "${FAKE_CLAUDE_LOG:-}" ]; then
   printf '%s\n' "$@" >> "$FAKE_CLAUDE_LOG"
+  printf -- '---\n' >> "$FAKE_CLAUDE_LOG"
 fi
 if [ "${FAKE_CLAUDE_MODE:-ok}" = "fail" ]; then
   echo "claude boom" >&2

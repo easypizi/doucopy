@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DaemonConfig } from "../src/config.js";
 import { ConversationStore } from "../src/conversations.js";
 import { createHandler } from "../src/handler.js";
+import type { Harness, HarnessOptions, HarnessResult } from "../src/harness.js";
 import { pausePeer } from "../src/paused.js";
 import type { Question } from "../src/types.js";
 
@@ -123,6 +124,58 @@ describe("createHandler", () => {
     expect(result.error).toMatch(/^peer paused/);
     expect(result.answer).toBeUndefined();
     expect(existsSync(logFile)).toBe(false);
+  });
+
+  it("uses the injected harness across a two-turn dialog (first task then follow-up)", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-handler-"));
+    interface Call { kind: "first" | "followup"; opts: HarnessOptions; sessionId?: string; task: string }
+    const calls: Call[] = [];
+    const fake: Harness = {
+      kind: "cursor-agent",
+      async runFirstTask(opts, task): Promise<HarnessResult> {
+        calls.push({ kind: "first", opts, task });
+        return { answer: "first-answer", sessionId: "sess-abc" };
+      },
+      async runFollowupTask(opts, sessionId, task): Promise<HarnessResult> {
+        calls.push({ kind: "followup", opts, sessionId, task });
+        return { answer: "followup-answer" };
+      },
+    };
+    const config = makeConfig(dir);
+    const store = new ConversationStore(path.join(dir, "conversations.json"));
+    const handler = createHandler(config, store, "test policy", fake);
+
+    const first = await handler(question());
+    expect(first.answer).toBe("first-answer");
+    expect(store.get("conv-1")).toBe("sess-abc");
+
+    const followup = await handler(question({ ticket_id: "t-2", question: "and then?" }));
+    expect(followup.answer).toBe("followup-answer");
+    expect(store.get("conv-1")).toBe("sess-abc");
+
+    expect(calls.map((c) => c.kind)).toEqual(["first", "followup"]);
+    expect(calls[0].task).toContain("Memory sources");
+    expect(calls[1].sessionId).toBe("sess-abc");
+    expect(calls[1].task).toContain("Follow-up question in the same conversation");
+  });
+
+  it("does not persist a session id when the injected harness returns an error", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-handler-"));
+    const fake: Harness = {
+      kind: "cursor-agent",
+      async runFirstTask(): Promise<HarnessResult> {
+        return { error: "boom" };
+      },
+      async runFollowupTask(): Promise<HarnessResult> {
+        throw new Error("should not be called");
+      },
+    };
+    const config = makeConfig(dir);
+    const store = new ConversationStore(path.join(dir, "conversations.json"));
+    const handler = createHandler(config, store, "test policy", fake);
+    const result = await handler(question());
+    expect(result.error).toBe("boom");
+    expect(store.get("conv-1")).toBeNull();
   });
 
   it("redacts configured literals and built-in secrets from the outgoing answer", async () => {

@@ -65,11 +65,8 @@ export function createHandler(
       ),
     };
     try {
-      let chatId = store.get(question.conversation_id);
-      const isFirstTurn = chatId === null;
-      if (chatId === null) {
-        chatId = await harness.createSession(runnerOpts);
-      }
+      const existingSessionId = store.get(question.conversation_id);
+      const isFirstTurn = existingSessionId === null;
       const ctx = {
         fromPeer: question.from_peer,
         conversationId: question.conversation_id,
@@ -78,9 +75,16 @@ export function createHandler(
       const task = isFirstTurn
         ? buildFirstTask(policy, question.question, collectMemory(config), ctx)
         : buildFollowupTask(policy, question.question, ctx);
-      const result = await harness.runTask(runnerOpts, chatId, task);
-      if (result.answer !== undefined) store.set(question.conversation_id, chatId);
-      return redactResult(result);
+      const result = isFirstTurn
+        ? await harness.runFirstTask(runnerOpts, task)
+        : await harness.runFollowupTask(runnerOpts, existingSessionId as string, task);
+      if (result.answer !== undefined) {
+        // First turn: persist the sessionId the harness discovered/created.
+        // Follow-up: keep the existing id; harnesses do not re-emit it.
+        const nextId = isFirstTurn ? result.sessionId : existingSessionId;
+        if (nextId) store.set(question.conversation_id, nextId);
+      }
+      return redactResult({ answer: result.answer, error: result.error });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return redactResult({ error: `responder failed: ${message.slice(0, 500)}` });
