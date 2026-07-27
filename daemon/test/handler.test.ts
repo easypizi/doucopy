@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DaemonConfig } from "../src/config.js";
 import { ConversationStore } from "../src/conversations.js";
 import { createHandler } from "../src/handler.js";
+import { pausePeer } from "../src/paused.js";
 import type { Question } from "../src/types.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -35,18 +36,23 @@ function question(overrides: Partial<Question> = {}): Question {
     from_peer: "personal",
     question: "hi",
     conversation_id: "conv-1",
+    hops: 0,
     created_at: 0,
     deadline: 1,
     ...overrides,
   };
 }
 
-const SAVED_ENV_KEYS = ["FAKE_AGENT_LOG", "FAKE_AGENT_MODE", "FAKE_AGENT_ANSWER"] as const;
+const SAVED_ENV_KEYS = ["FAKE_AGENT_LOG", "FAKE_AGENT_MODE", "FAKE_AGENT_ANSWER", "AGENT_LINK_PAUSED_FILE"] as const;
 let savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
   savedEnv = {};
   for (const key of SAVED_ENV_KEYS) savedEnv[key] = process.env[key];
+  process.env.AGENT_LINK_PAUSED_FILE = path.join(
+    mkdtempSync(path.join(tmpdir(), "agent-link-paused-")),
+    "paused.json",
+  );
 });
 
 afterEach(() => {
@@ -101,6 +107,22 @@ describe("createHandler", () => {
     expect(
       readFileSync(path.join(config.responder.workspace_dir, "conv-b", "task.md"), "utf8"),
     ).toContain("Memory sources");
+  });
+
+  it("returns a paused error without running cursor-agent when the asker is paused", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-handler-"));
+    const logFile = path.join(dir, "args.log");
+    process.env.FAKE_AGENT_LOG = logFile;
+    process.env.FAKE_AGENT_MODE = "ok";
+    pausePeer("personal", null);
+
+    const config = makeConfig(dir);
+    const store = new ConversationStore(path.join(dir, "conversations.json"));
+    const handler = createHandler(config, store, "test policy");
+    const result = await handler(question());
+    expect(result.error).toMatch(/^peer paused/);
+    expect(result.answer).toBeUndefined();
+    expect(existsSync(logFile)).toBe(false);
   });
 
   it("redacts configured literals and built-in secrets from the outgoing answer", async () => {

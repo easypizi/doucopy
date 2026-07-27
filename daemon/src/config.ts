@@ -3,19 +3,39 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { compileRedactRules, type RedactConfig } from "./redact.js";
 
+export type HarnessKind = "cursor-agent" | "claude" | "codex";
+
 export interface DaemonConfig {
   relay_url: string;
   self_peer: string;
   token: string;
   memory_sources: { transcripts_glob: string; agents_md_roots: string[]; extra_files: string[] };
   responder: {
-    cursor_agent_binary: string;
+    harness?: HarnessKind;
+    binary?: string;
+    cursor_agent_binary?: string;
     workspace_dir: string;
     response_timeout_seconds: number;
     max_concurrent?: number;
     model?: string;
+    extra_args?: string[];
   };
   redact?: Partial<RedactConfig>;
+}
+
+const HARNESS_DEFAULT_BINARY: Record<HarnessKind, string> = {
+  "cursor-agent": "cursor-agent",
+  claude: "claude",
+  codex: "codex",
+};
+
+export function resolveHarness(config: DaemonConfig): { kind: HarnessKind; binary: string } {
+  const kind = config.responder.harness ?? "cursor-agent";
+  const binary =
+    config.responder.binary
+    ?? (kind === "cursor-agent" ? config.responder.cursor_agent_binary : undefined)
+    ?? HARNESS_DEFAULT_BINARY[kind];
+  return { kind, binary };
 }
 
 export function expandHome(p: string): string {
@@ -46,8 +66,15 @@ export function loadConfig(filePath = "~/.agent-link/config.json"): DaemonConfig
   if (!config.responder || typeof config.responder !== "object") {
     throw new Error("config: missing responder");
   }
-  if (!config.responder.cursor_agent_binary) {
-    throw new Error("config: missing responder.cursor_agent_binary");
+  if (config.responder.harness !== undefined && !["cursor-agent", "claude", "codex"].includes(config.responder.harness)) {
+    throw new Error(`config: responder.harness must be cursor-agent, claude or codex, got ${config.responder.harness}`);
+  }
+  const isCursor = (config.responder.harness ?? "cursor-agent") === "cursor-agent";
+  if (isCursor && !config.responder.binary && !config.responder.cursor_agent_binary) {
+    throw new Error("config: missing responder.binary (or legacy responder.cursor_agent_binary)");
+  }
+  if (config.responder.extra_args !== undefined && !(Array.isArray(config.responder.extra_args) && config.responder.extra_args.every((v) => typeof v === "string"))) {
+    throw new Error("config: responder.extra_args must be an array of strings");
   }
   if (!config.responder.workspace_dir) {
     throw new Error("config: missing responder.workspace_dir");

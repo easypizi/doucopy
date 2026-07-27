@@ -19,6 +19,7 @@ const QUESTION = {
   from_peer: "personal",
   question: "hi",
   conversation_id: "c-1",
+  hops: 0,
   created_at: 0,
   deadline: 1,
 };
