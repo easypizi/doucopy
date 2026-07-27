@@ -20,9 +20,16 @@ async function requireHerokuCli(exec: ExecFn): Promise<void> {
   }
 }
 
+// Returns null only when the key is genuinely unset (exit 0 + empty stdout).
+// Any non-zero exit is a real failure (auth, network, wrong app) and must
+// propagate — otherwise runDeploy would treat a transient error as "no
+// RELAY_SECRET set" and silently rotate the secret on every peer.
 async function herokuConfigGet(exec: ExecFn, app: string, key: string): Promise<string | null> {
   const res = await exec(HEROKU, ["config:get", key, "-a", app]);
-  if (res.code !== 0) return null;
+  if (res.code !== 0) {
+    const detail = res.stderr.trim() || res.stdout.trim() || `exit ${res.code}`;
+    throw new Error(`heroku config:get ${key} failed: ${detail.slice(0, 500)}`);
+  }
   const value = res.stdout.trim();
   return value.length > 0 ? value : null;
 }

@@ -48,7 +48,7 @@ describe("runDeploy", () => {
     const { exec, calls } = mockExec([
       () => ({ code: 0, stdout: "heroku/9.0.0" }),
       () => ({ code: 0, stdout: APP_INFO }),
-      () => ({ code: 1, stdout: "" }),
+      () => ({ code: 0, stdout: "" }),
       () => ({ code: 0 }),
       () => ({ code: 0, stdout: "pushed" }),
     ]);
@@ -97,6 +97,19 @@ describe("runDeploy", () => {
       () => ({ code: 1, stderr: "rejected: non-fast-forward" }),
     ]);
     await expect(runDeploy({ app: APP, exec })).rejects.toThrow(/git push heroku failed.*non-fast-forward/);
+  });
+
+  it("does NOT rotate RELAY_SECRET when heroku config:get transiently fails", async () => {
+    const { exec, calls } = mockExec([
+      () => ({ code: 0 }),
+      () => ({ code: 0, stdout: APP_INFO }),
+      () => ({ code: 1, stderr: "Error: connect ETIMEDOUT" }),
+    ]);
+    await expect(runDeploy({ app: APP, exec })).rejects.toThrow(/heroku config:get RELAY_SECRET failed.*ETIMEDOUT/);
+    // Critical: no config:set and no git push must have run.
+    const cmds = calls.map((c) => `${c.cmd} ${c.args[0]}`);
+    expect(cmds).not.toContain("heroku config:set");
+    expect(cmds).not.toContain("git push");
   });
 });
 
@@ -181,11 +194,19 @@ describe("loadRelaySecretFromHeroku", () => {
     await expect(loadRelaySecretFromHeroku(APP, exec)).resolves.toBe("supersecret-1234567890");
   });
 
-  it("throws when the secret is missing", async () => {
+  it("throws with a distinct message when the secret is unset (exit 0 + empty stdout)", async () => {
     const { exec } = mockExec([
       () => ({ code: 0 }),
-      () => ({ code: 1 }),
+      () => ({ code: 0, stdout: "" }),
     ]);
     await expect(loadRelaySecretFromHeroku(APP, exec)).rejects.toThrow(/RELAY_SECRET is not set/);
+  });
+
+  it("propagates a transient heroku failure instead of treating it as unset", async () => {
+    const { exec } = mockExec([
+      () => ({ code: 0 }),
+      () => ({ code: 1, stderr: "!!! Error: ETIMEDOUT" }),
+    ]);
+    await expect(loadRelaySecretFromHeroku(APP, exec)).rejects.toThrow(/heroku config:get RELAY_SECRET failed/);
   });
 });
