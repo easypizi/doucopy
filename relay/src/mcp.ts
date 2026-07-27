@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { Mailbox } from "./mailbox.js";
+import { ConversationFullError, HopLimitError, MAX_HOPS, type Mailbox } from "./mailbox.js";
 
 const KEEPALIVE_INTERVAL_MS = 15_000;
 const DEFAULT_TIMEOUT_S = 120;
@@ -47,24 +47,36 @@ export function buildMcpServer(
         "Ask another account's agent a question. It answers from its own memory (chat history, notes). " +
         "Pass conversation_id from a previous result to continue the same conversation. " +
         "If status is pending or peer_offline, fetch the answer later with check_reply. " +
-        "Peers that are offline or unknown still get the question queued for 24 hours.",
+        "Peers that are offline or unknown still get the question queued for 24 hours. " +
+        `Counter-questions: set hops=1 to ask a follow-up back to the asker inside the same conversation_id (max depth ${MAX_HOPS}).`,
       inputSchema: {
         peer: z.string().describe("Peer name from list_peers"),
         question: z.string(),
         timeout_seconds: z.number().int().positive().optional(),
         conversation_id: z.string().optional(),
+        hops: z.number().int().min(0).max(MAX_HOPS).optional(),
       },
     },
-    async ({ peer, question, timeout_seconds, conversation_id }, extra) => {
+    async ({ peer, question, timeout_seconds, conversation_id, hops }, extra) => {
       if (peer === fromPeer) {
         return json({ status: "error", error: "cannot ask yourself" });
       }
-      const { ticket_id, conversation_id: convId } = mailbox.enqueue(
-        peer,
-        fromPeer,
-        question,
-        conversation_id,
-      );
+      let ticket_id: string;
+      let convId: string;
+      try {
+        ({ ticket_id, conversation_id: convId } = mailbox.enqueue(
+          peer,
+          fromPeer,
+          question,
+          conversation_id,
+          hops ?? 0,
+        ));
+      } catch (err) {
+        if (err instanceof HopLimitError || err instanceof ConversationFullError) {
+          return json({ status: "error", error: err.message });
+        }
+        throw err;
+      }
       if (!mailbox.isOnline(peer)) {
         return json({ status: "peer_offline", ticket_id, conversation_id: convId });
       }

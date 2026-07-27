@@ -3,6 +3,7 @@ export interface Question {
   from_peer: string;
   question: string;
   conversation_id: string;
+  hops: number;
   created_at: number;
   deadline: number;
 }

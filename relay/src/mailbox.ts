@@ -5,6 +5,8 @@ const QUESTION_TTL_MS = 24 * 60 * 60 * 1000;
 const RETENTION_MS = QUESTION_TTL_MS;
 const INBOX_LIMIT = 100;
 const ONLINE_WINDOW_MS = 60_000;
+export const MAX_HOPS = 1;
+export const MAX_OPEN_PER_CONVERSATION = 4;
 
 export type ReplyStatus =
   | { status: "answered"; answer: string }
@@ -15,12 +17,26 @@ export type ReplyStatus =
 interface PendingEntry {
   peer: string;
   from: string;
+  conversation_id: string;
+  hops: number;
   created_at: number;
   deadline: number;
   answer?: string;
   error?: string;
   settled: boolean;
   settleListeners: Set<() => void>;
+}
+
+export class HopLimitError extends Error {
+  constructor(hops: number) {
+    super(`hops=${hops} exceeds the counter-question depth limit (max ${MAX_HOPS})`);
+  }
+}
+
+export class ConversationFullError extends Error {
+  constructor(conversationId: string) {
+    super(`conversation ${conversationId} has too many open tickets (max ${MAX_OPEN_PER_CONVERSATION})`);
+  }
 }
 
 export interface OutgoingTicket {
@@ -47,22 +63,34 @@ export class Mailbox {
     fromPeer: string,
     question: string,
     conversationId?: string,
+    hops = 0,
   ): { ticket_id: string; conversation_id: string } {
     this.cleanup();
+    if (hops > MAX_HOPS) throw new HopLimitError(hops);
     const now = Date.now();
     const ticket_id = uuidv7();
     const conversation_id = conversationId ?? uuidv7();
+    if (conversationId !== undefined) {
+      let open = 0;
+      for (const entry of this.pending.values()) {
+        if (entry.conversation_id === conversationId && !entry.settled) open += 1;
+      }
+      if (open >= MAX_OPEN_PER_CONVERSATION) throw new ConversationFullError(conversationId);
+    }
     const item: Question = {
       ticket_id,
       from_peer: fromPeer,
       question,
       conversation_id,
+      hops,
       created_at: now,
       deadline: now + QUESTION_TTL_MS,
     };
     this.pending.set(ticket_id, {
       peer: toPeer,
       from: fromPeer,
+      conversation_id,
+      hops,
       created_at: now,
       deadline: item.deadline,
       settled: false,

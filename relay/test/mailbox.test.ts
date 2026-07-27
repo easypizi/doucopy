@@ -172,6 +172,26 @@ describe("Mailbox", () => {
     expect(box.queuedCount("personal")).toBe(0);
   });
 
+  it("rejects hops beyond MAX_HOPS", () => {
+    const box = new Mailbox();
+    expect(() => box.enqueue("work", "personal", "q", "conv-1", 2)).toThrow(/counter-question depth/);
+  });
+
+  it("rejects a conversation with too many open tickets", () => {
+    const box = new Mailbox();
+    for (let i = 0; i < 4; i += 1) box.enqueue("work", "personal", `q${i}`, "conv-x");
+    expect(() => box.enqueue("work", "personal", "q5", "conv-x")).toThrow(/too many open tickets/);
+  });
+
+  it("does not count settled tickets toward the conversation limit", () => {
+    const box = new Mailbox();
+    const first = box.enqueue("work", "personal", "q", "conv-y");
+    box.settle(first.ticket_id, { answer: "42" });
+    for (let i = 0; i < 4; i += 1) {
+      expect(() => box.enqueue("work", "personal", `q${i}`, "conv-y")).not.toThrow();
+    }
+  });
+
   it("lists outgoing tickets with statuses for the asking peer", () => {
     const box = new Mailbox();
     const a = box.enqueue("work", "personal", "q1");

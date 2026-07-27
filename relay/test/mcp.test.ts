@@ -139,6 +139,36 @@ describe("MCP tools", () => {
     expect(result.status).toBe("answered");
   });
 
+  it("ask_peer with hops=1 keeps the same conversation_id", async () => {
+    const mailbox = new Mailbox();
+    const client = await connect(mailbox, "work");
+    const result = payload(
+      await client.callTool({
+        name: "ask_peer",
+        arguments: { peer: "personal", question: "clarify?", conversation_id: "conv-42", hops: 1 },
+      }),
+    );
+    expect(result.status).toBe("peer_offline");
+    expect(result.conversation_id).toBe("conv-42");
+    const question = await mailbox.takeNext("personal", 0);
+    expect(question?.hops).toBe(1);
+    expect(question?.conversation_id).toBe("conv-42");
+  });
+
+  it("ask_peer rejects an overfilled conversation", async () => {
+    const mailbox = new Mailbox();
+    for (let i = 0; i < 4; i += 1) mailbox.enqueue("work", "personal", `q${i}`, "conv-full");
+    const client = await connect(mailbox, "personal");
+    const result = payload(
+      await client.callTool({
+        name: "ask_peer",
+        arguments: { peer: "work", question: "one more", conversation_id: "conv-full" },
+      }),
+    );
+    expect(result.status).toBe("error");
+    expect(result.error).toMatch(/too many open tickets/);
+  });
+
   it("check_reply fetches a late answer", async () => {
     const mailbox = new Mailbox();
     const { ticket_id } = mailbox.enqueue("work", "personal", "hi");
