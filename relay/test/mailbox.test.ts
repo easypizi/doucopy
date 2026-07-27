@@ -192,6 +192,30 @@ describe("Mailbox", () => {
     }
   });
 
+  it("derives hops from open inbound tickets even when the client passes hops=0", async () => {
+    const box = new Mailbox();
+    // A asks B (hops 0). Simulate B taking the question but not yet answering.
+    const first = box.enqueue("work", "personal", "hey?", "conv-c");
+    expect(first).toBeDefined();
+    // B (the peer that owes an answer) sends a counter-question back to A in
+    // the same conversation, but "forgets" to bump hops. Server must derive
+    // hops = 1 anyway.
+    const counter = box.enqueue("personal", "work", "wait, which?", "conv-c", 0);
+    const q = await box.takeNext("personal", 1000);
+    expect(q?.ticket_id).toBe(counter.ticket_id);
+    expect(q?.hops).toBe(1);
+  });
+
+  it("blocks a third-level counter-question even if the client claims hops=0", () => {
+    const box = new Mailbox();
+    box.enqueue("work", "personal", "q1", "conv-d");                   // A -> B, hops 0
+    box.enqueue("personal", "work", "counter1", "conv-d", 0);          // B -> A, derived 1
+    // A now tries to counter B's counter in the same conversation. Server
+    // sees an open inbound entry for A (hops 1), so derived would be 2 > MAX.
+    expect(() => box.enqueue("work", "personal", "counter2", "conv-d", 0))
+      .toThrow(/counter-question depth/);
+  });
+
   it("lists outgoing tickets with statuses for the asking peer", () => {
     const box = new Mailbox();
     const a = box.enqueue("work", "personal", "q1");

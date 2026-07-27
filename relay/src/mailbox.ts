@@ -63,20 +63,35 @@ export class Mailbox {
     fromPeer: string,
     question: string,
     conversationId?: string,
-    hops = 0,
+    clientHops = 0,
   ): { ticket_id: string; conversation_id: string } {
     this.cleanup();
-    if (hops > MAX_HOPS) throw new HopLimitError(hops);
     const now = Date.now();
     const ticket_id = uuidv7();
     const conversation_id = conversationId ?? uuidv7();
+    // Derive hops from server state so a malicious client cannot bypass the
+    // depth limit by simply omitting the parameter. If fromPeer currently owes
+    // an unsettled answer in this conversation (entry.peer === fromPeer), the
+    // new question is a counter-question and its hops must be at least
+    // max(open inbound hops) + 1. Take max(client, derived) so honest clients
+    // that already increment the counter still behave correctly.
+    let derivedHops = 0;
     if (conversationId !== undefined) {
       let open = 0;
+      let maxInboundHops = -1;
       for (const entry of this.pending.values()) {
-        if (entry.conversation_id === conversationId && !entry.settled) open += 1;
+        if (entry.conversation_id !== conversationId) continue;
+        if (entry.settled) continue;
+        open += 1;
+        if (entry.peer === fromPeer && entry.hops > maxInboundHops) {
+          maxInboundHops = entry.hops;
+        }
       }
       if (open >= MAX_OPEN_PER_CONVERSATION) throw new ConversationFullError(conversationId);
+      if (maxInboundHops >= 0) derivedHops = maxInboundHops + 1;
     }
+    const hops = Math.max(clientHops, derivedHops);
+    if (hops > MAX_HOPS) throw new HopLimitError(hops);
     const item: Question = {
       ticket_id,
       from_peer: fromPeer,
