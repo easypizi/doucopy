@@ -5,6 +5,7 @@ import type { ConversationStore } from "./conversations.js";
 import { createHarness, type Harness, type HarnessOptions } from "./harness.js";
 import { isPaused, pausedUntil } from "./paused.js";
 import type { QuestionHandler } from "./poller.js";
+import { readPolicy } from "./policy.js";
 import { buildFirstTask, buildFollowupTask, type MemoryMap } from "./prompt.js";
 import { applyRedactions, compileRedactRules } from "./redact.js";
 import { safeDirName } from "./workspace.js";
@@ -20,7 +21,7 @@ function collectMemory(config: DaemonConfig): MemoryMap {
 export function createHandler(
   config: DaemonConfig,
   store: ConversationStore,
-  policy: string,
+  policyPath: string,
   injectedHarness?: Harness,
 ): QuestionHandler {
   const { kind, binary } = resolveHarness(config);
@@ -32,30 +33,38 @@ export function createHandler(
     model: config.responder.model,
     extraArgs: config.responder.extra_args,
   };
-  const redactRules = compileRedactRules(config.redact);
 
   // Deterministic post-filter: runs in daemon code, outside the LLM, so the
-  // asking agent cannot talk its way around it.
-  const redactResult = (result: { answer?: string; error?: string }) => {
+  // asking agent cannot talk its way around it. Rules come from two sources:
+  // the `## Never reveal` section of policy.md (single documented place for
+  // users) and the legacy `redact` field in config.json (still honoured for
+  // back-compat). Re-parsed per question so edits to policy.md take effect
+  // without a daemon restart.
+  const redactResult = (parsedNeverReveal: { literals: string[]; patterns: string[] }, result: { answer?: string; error?: string }) => {
+    const rules = compileRedactRules({
+      literals: [...(config.redact?.literals ?? []), ...parsedNeverReveal.literals],
+      patterns: [...(config.redact?.patterns ?? []), ...parsedNeverReveal.patterns],
+    });
     const out = { ...result };
     if (out.answer !== undefined) {
-      const { text, redactedCount } = applyRedactions(out.answer, redactRules);
+      const { text, redactedCount } = applyRedactions(out.answer, rules);
       out.answer = text;
       if (redactedCount > 0) {
         console.error(`redacted ${redactedCount} match(es) from an outgoing answer`);
       }
     }
     if (out.error !== undefined) {
-      out.error = applyRedactions(out.error, redactRules).text;
+      out.error = applyRedactions(out.error, rules).text;
     }
     return out;
   };
 
   return async (question) => {
+    const parsedPolicy = readPolicy(policyPath);
     if (isPaused(question.from_peer)) {
       const until = pausedUntil(question.from_peer);
       const suffix = typeof until === "number" ? ` until ${new Date(until).toISOString()}` : "";
-      return redactResult({ error: `peer paused${suffix}` });
+      return redactResult(parsedPolicy.neverReveal, { error: `peer paused${suffix}` });
     }
     const runnerOpts: HarnessOptions = {
       ...baseRunnerOpts,
@@ -73,8 +82,8 @@ export function createHandler(
         hops: question.hops,
       };
       const task = isFirstTurn
-        ? buildFirstTask(policy, question.question, collectMemory(config), ctx)
-        : buildFollowupTask(policy, question.question, ctx);
+        ? buildFirstTask(parsedPolicy.text, question.question, collectMemory(config), ctx)
+        : buildFollowupTask(parsedPolicy.text, question.question, ctx);
       const result = isFirstTurn
         ? await harness.runFirstTask(runnerOpts, task)
         : await harness.runFollowupTask(runnerOpts, existingSessionId as string, task);
@@ -84,10 +93,10 @@ export function createHandler(
         const nextId = isFirstTurn ? result.sessionId : existingSessionId;
         if (nextId) store.set(question.conversation_id, nextId);
       }
-      return redactResult({ answer: result.answer, error: result.error });
+      return redactResult(parsedPolicy.neverReveal, { answer: result.answer, error: result.error });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return redactResult({ error: `responder failed: ${message.slice(0, 500)}` });
+      return redactResult(parsedPolicy.neverReveal, { error: `responder failed: ${message.slice(0, 500)}` });
     }
   };
 }

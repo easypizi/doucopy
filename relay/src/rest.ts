@@ -1,11 +1,17 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { bearerToken, PEER_NAME_PATTERN, type TokenService } from "./auth.js";
-import type { Mailbox } from "./mailbox.js";
+import { ConversationFullError, HopLimitError, MAX_HOPS, type Mailbox } from "./mailbox.js";
 
 const MAX_WAIT_SECONDS = 25;
 const JOIN_WINDOW_MS = 60_000;
 const JOIN_LIMIT_PER_WINDOW = 10;
 const MAX_INVITE_TTL_HOURS = 720;
+// The REST ask/reply pair is polling-based: an ask can request up to
+// ASK_MAX_WAIT_SECONDS of synchronous waiting inside the request; anything
+// beyond that must be picked up with /reply. Kept identical to /inbox so all
+// HTTP endpoints behave consistently under Heroku's 30s router timeout.
+const ASK_MAX_WAIT_SECONDS = 25;
+const REPLY_MAX_WAIT_SECONDS = 25;
 
 export function authPeer(req: FastifyRequest, tokens: TokenService): string | null {
   const token = bearerToken(req.headers.authorization);
@@ -80,6 +86,72 @@ export function registerRest(app: FastifyInstance, mailbox: Mailbox, tokens: Tok
     }
     return tokens.issueInvite(ttl);
   });
+
+  // REST twin of the MCP `ask_peer` tool for terminal-only clients.
+  // Returns { status, ticket_id, conversation_id, answer?, error? } where
+  // status ∈ { answered, pending, error, peer_offline }. Long-polls the
+  // mailbox for up to `wait_seconds` (default 25) before falling back to
+  // pending — the caller resumes with GET /reply/:ticket_id.
+  app.post<{
+    Body: {
+      peer?: string;
+      question?: string;
+      wait_seconds?: number;
+      conversation_id?: string;
+      hops?: number;
+    };
+  }>("/ask", async (req, reply) => {
+    const fromPeer = authPeer(req, tokens);
+    if (!fromPeer) return reply.code(401).send({ error: "unauthorized" });
+    const { peer, question, wait_seconds, conversation_id, hops } = req.body ?? {};
+    if (!peer || typeof peer !== "string") return reply.code(400).send({ error: "peer required" });
+    if (!question || typeof question !== "string") return reply.code(400).send({ error: "question required" });
+    if (peer === fromPeer) return reply.code(400).send({ error: "cannot ask yourself" });
+    if (hops !== undefined && (!Number.isInteger(hops) || hops < 0 || hops > MAX_HOPS)) {
+      return reply.code(400).send({ error: `hops must be an integer between 0 and ${MAX_HOPS}` });
+    }
+    let ticket_id: string;
+    let convId: string;
+    try {
+      ({ ticket_id, conversation_id: convId } = mailbox.enqueue(
+        peer,
+        fromPeer,
+        question,
+        conversation_id,
+        hops ?? 0,
+      ));
+    } catch (err) {
+      if (err instanceof HopLimitError || err instanceof ConversationFullError) {
+        return reply.code(400).send({ status: "error", error: err.message });
+      }
+      throw err;
+    }
+    if (!mailbox.isOnline(peer)) {
+      return { status: "peer_offline", ticket_id, conversation_id: convId };
+    }
+    const requested = Number(wait_seconds ?? ASK_MAX_WAIT_SECONDS);
+    const waitSeconds = Math.min(Math.max(Number.isFinite(requested) ? requested : ASK_MAX_WAIT_SECONDS, 0), ASK_MAX_WAIT_SECONDS);
+    const result = await mailbox.waitForAnswer(ticket_id, waitSeconds * 1000);
+    return { ...result, ticket_id, conversation_id: convId };
+  });
+
+  // GET /reply/:ticket_id?wait=N — poll or long-poll for an answer. Returns
+  // the same shape as /ask minus routing fields. Consumes the entry on
+  // answered/error (single-read semantics), same as the MCP check_reply tool.
+  app.get<{ Params: { ticket_id: string }; Querystring: { wait?: string } }>(
+    "/reply/:ticket_id",
+    async (req, reply) => {
+      const peer = authPeer(req, tokens);
+      if (!peer) return reply.code(401).send({ error: "unauthorized" });
+      const requested = Number(req.query.wait ?? 0);
+      const parsed = Number.isFinite(requested) ? requested : 0;
+      const waitSeconds = Math.min(Math.max(parsed, 0), REPLY_MAX_WAIT_SECONDS);
+      const result = waitSeconds > 0
+        ? await mailbox.waitForAnswer(req.params.ticket_id, waitSeconds * 1000)
+        : mailbox.checkReply(req.params.ticket_id);
+      return { ...result, ticket_id: req.params.ticket_id };
+    },
+  );
 
   app.get("/status", async (req, reply) => {
     const peer = authPeer(req, tokens);

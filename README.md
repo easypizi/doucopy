@@ -1,117 +1,102 @@
-# agent-link
+# doucopy
 
-Connect AI agents from different accounts of the same person (or a small trusted circle) so one can ask the other questions answered from its own memory, chat history and notes.
+Two AI agents. Different accounts. Same person (or a small trusted circle). One can ask the other about anything already in the other's chat history, notes and code — and get an answer written by that other agent.
+
+Published to npm as **`doucopy`**. The binary is still called `agent-link` (both `agent-link` and `doucopy` work as commands).
 
 Two moving parts:
 
-- A **relay** you host once. Stateless HMAC auth, no database.
+- A **relay** somebody in the circle hosts once (Heroku or Docker, stateless HMAC auth, no database).
 - A **responder daemon** on every machine that should answer questions.
 
 Every machine also exposes an MCP server (`ask_peer`, `list_peers`, `check_reply`) that plugs directly into Cursor, Claude Code and OpenAI Codex.
 
 ## Requirements
 
-- Node.js 22.x on every machine (relay and responders).
-- macOS for the responder daemon (uses `launchd`). Linux support is planned.
-- A running Heroku or Docker host for the relay.
-- A local coding-agent CLI on every responder machine: `cursor-agent`, `claude`, or `codex`.
-
-Everything below is wrapped in `make` targets. Run `make` (or `make help`) to see the full list. Under the hood every target calls `node cli/dist/index.js ...` (aka `agent-link`), so you can use either surface.
+- Node.js 22.x on every machine (relay and peers).
+- macOS for the responder daemon (uses `launchd`). Asker-only mode works on Linux too.
+- A local coding-agent CLI on every responder machine: `cursor-agent`, `claude` or `codex`.
+- Somebody in the circle has a Heroku (or Docker) host for the relay.
 
 ---
 
-## Step-by-step guide
+## If somebody already hosts a relay for you
 
-Below, `APP` is your Heroku app name (default: `mcp-ivan-connector`) and `<relay-url>` is your deployed relay (`https://<app>.herokuapp.com` or the custom domain Heroku assigns).
-
-### Step 0. Clone and build
+You need Node 22 and an invite code (looks like `ali1.eyJ...`). Then, one command:
 
 ```bash
-git clone <your-fork-of-this-repo> ~/dev/agent-link
-cd ~/dev/agent-link
-make install
-make build
+npx doucopy join <relay-url> <invite>
 ```
 
-### Step 1. Deploy the relay (one time)
+The wizard asks:
 
-Requires Heroku CLI logged in, and a remote called `heroku` pointing at your app:
-
-```bash
-heroku create <app>
-git remote add heroku https://git.heroku.com/<app>.git
-make deploy APP=<app>
-```
-
-`deploy` generates a `RELAY_SECRET` (32 base64url bytes) if there isn't one, pushes to Heroku, and health-checks. `RELAY_SECRET` signs every peer token and invite, so keep it safe.
-
-Later relay ops (all default to `APP=mcp-ivan-connector`, override with `APP=<name>`):
-
-```bash
-make health                    # /health
-make rotate-secret             # invalidates every peer, emergencies only
-make revoke   PEER=ex-mbp      # kill one peer's token
-make unrevoke PEER=ex-mbp
-```
-
-For a local relay: `make relay RELAY_SECRET=$(openssl rand -hex 32)`.
-
-### Step 2. Bootstrap the first machine
-
-On the machine that has the Heroku CLI, generate a bootstrap invite (reads `RELAY_SECRET` from the app):
-
-```bash
-make invite-bootstrap APP=<app>
-# copy the printed invite string (looks like: ali1.eyJ...)
-```
-
-Join the relay:
-
-```bash
-make join RELAY=<relay-url> INVITE=<invite>
-```
-
-`join` interactively asks two things:
-
-1. **Peer name** for this machine (letters, digits, `. _ -`, e.g. `personal-mbp`).
-2. **Which harness answers questions** (only if more than one of `cursor-agent`, `claude`, `codex` is on `PATH`).
+1. **Peer name** for this machine (default is your hostname, editable).
+2. **Where to authorize** as an asker: Cursor / Claude Code / Codex (multi-select, pre-checked based on what's installed).
+3. **Which harness answers questions** for other peers, or pick `asker-only` if you never want to be a responder.
+4. **Install skills globally** into `~/.cursor/skills` and `~/.claude/skills`.
+5. **Never reveal**: comma-separated words the responder must strip from every outgoing answer.
 
 Then, without asking:
 
 - exchanges the invite for a peer token,
 - writes `~/.agent-link/config.json` and `~/.agent-link/policy.md`,
-- merges an `agent-link` entry into every detected asker config (`~/.cursor/mcp.json`, `~/.claude.json`, `~/.codex/config.toml`), keeping a `.bak` backup,
-- installs a `launchd` responder daemon and waits until it reports online.
+- merges an `agent-link` entry into the MCP config of every chosen client,
+- (unless asker-only) installs and starts the `launchd` responder daemon and waits until it reports online.
 
 **Restart your coding agent (Cursor / Claude Code / Codex)** so it picks up the new MCP server.
 
-### Step 3. Add another machine
+**Resuming the wizard.** Run `npx doucopy join` (or `make join` in a repo checkout) without arguments any time:
 
-From the first, already-joined machine:
+- If this machine is already connected, the wizard offers to reuse the existing peer and token and just walks through askers / responder / skills / policy again.
+- If a previous run was interrupted after you typed the relay URL and invite, they're prefilled on the next attempt (draft stored in `~/.agent-link/join-draft.json`, TTL 48h, deleted on success).
+
+Non-interactive form for scripts:
 
 ```bash
-make invite TTL=24
-# copy the invite
+npx doucopy join <relay-url> <invite> \
+  --name work-mbp --harness claude --askers cursor,claude \
+  --never-reveal "AcmeCorp, project-yellowstone" --yes
 ```
 
-On the new machine (needs `git`, Node 22+, and one of the harness CLIs):
+---
+
+## If you host the relay yourself
+
+You still need a Heroku (or Docker) deployment, so this is a git-clone workflow.
 
 ```bash
-git clone <your-fork-of-this-repo> ~/dev/agent-link
-cd ~/dev/agent-link
+git clone https://github.com/easypizi/pshpsh ~/dev/doucopy
+cd ~/dev/doucopy
 make install && make build
-make join RELAY=<relay-url> INVITE=<invite>
+heroku login
+make setup
 ```
 
-Repeat for as many machines as you like. Every machine ends up with the same `agent-link` MCP server available in its coding agent.
+`make setup` is the owner wizard: it checks Heroku CLI + login, asks for an app name, runs `make deploy`, mints a 24h bootstrap invite, then hands off to the same `join` wizard so this machine ends up configured as the first peer.
 
-### Step 4. Daily use inside your coding agent
+Later ops (all default to `APP=mcp-ivan-connector`, override with `APP=<name>`):
 
-In a Cursor / Claude Code / Codex chat, call these tools:
+```bash
+make deploy            # push and health-check
+make health            # /health
+make invite-bootstrap  # mint another invite using the Heroku RELAY_SECRET
+make rotate-secret     # emergencies only, breaks every peer
+make revoke   PEER=ex-mbp
+make unrevoke PEER=ex-mbp
+make publish           # npm publish (owners only, needs npm login)
+```
+
+Local relay for testing: `make relay RELAY_SECRET=$(openssl rand -hex 32)`.
+
+---
+
+## Daily use
+
+### From your coding agent (MCP)
 
 ```
 list_peers
-    → shows every known peer and whether it is currently online
+    → every known peer + whether it's online right now
 
 ask_peer(peer="work-mbp", question="What did I decide about billing last week?")
     → save both ticket_id and conversation_id from the response
@@ -130,30 +115,45 @@ check_reply(ticket_id="…")
 | `answered` | you have `answer`, done |
 | `pending` | didn't finish inside `timeout_seconds`, call `check_reply` later |
 | `peer_offline` | peer hasn't polled the relay for >60s; question is queued for 24h, use `check_reply` |
-| `error` | show the `error` field to the user, don't retry silently |
+| `error` | show the `error` field, don't retry silently |
 
-### Step 5. Daily use from the terminal
+### From the terminal
 
 ```bash
-make status                                  # daemon, known peers, active dialogs, paused peers
-make logs FOLLOW=1                           # live responder log (omit FOLLOW for a one-shot tail)
-make start | make stop | make restart        # control the launchd daemon
-make pause  PEER=work-mbp FOR=2h             # 90s / 15m / 2h / 1d, or UNTIL=2026-07-28T09:00:00Z, or omit both for indefinite
-make resume PEER=work-mbp
+npx doucopy chat                      # interactive REPL: colored peers table, /use <peer>, then type
+npx doucopy status                    # daemon, peers, dialogs, paused peers, coloured status
+npx doucopy policy                    # opens ~/.agent-link/policy.md in $EDITOR
+npx doucopy logs -f                   # tail the responder log
+npx doucopy pause work-mbp --for 2h   # refuse questions from a peer
+npx doucopy resume work-mbp
+npx doucopy start | stop | restart    # control the launchd daemon
+npx doucopy invite --ttl 48           # mint an invite from this machine
 ```
 
-Pauses live in `~/.agent-link/paused.json` and are local to the machine. While a peer is paused, its `ask_peer` calls to you come back as `error: peer paused until ...`.
+Every command has a `make` alias for a repo checkout: `make chat`, `make status`, `make policy`, `make invite`, `make pause PEER=work-mbp FOR=2h`, and so on. Run `make` for the full list.
 
-### Step 6. Counter-questions (v2.1)
+### The single filter: policy.md
 
-If a question is ambiguous, the responder may fire back one clarifying question via `ask_peer(peer=<asker>, conversation_id=<same>, hops: 1)`. Your local daemon answers it from your own memory sources, and the responder then produces the final answer.
+`~/.agent-link/policy.md` is the one place to control the responder:
 
-Limits are enforced by the relay:
+- The top of the file is the instruction prepended to every task the responder runs.
+- The `## Never reveal` section is a deterministic post-filter that runs in daemon code (outside the LLM), stripping matches from every outgoing `answer` and `error`. Bullet lines are case-insensitive literals; slash-wrapped bullets are regex (`- /internal-project-\d+/`).
 
-- `hops` is capped at 1, no ping-pong,
-- at most 4 open tickets per conversation.
+Edits take effect on the next question, no restart. Open the file with `npx doucopy policy`.
 
-If you expect a counter-question, ask with a generous `timeout_seconds: 240`.
+### Counter-questions
+
+If a question is ambiguous, the responder may fire back one clarifying question in the same conversation. Your local daemon answers it from your own memory sources, then the responder produces the final answer. Relay-enforced limits: `hops` capped at 1, at most 4 open tickets per conversation. Expect this? Pass a generous `timeout_seconds: 240`.
+
+---
+
+## Capacity
+
+The relay is designed for a small circle of trusted machines, tens rather than thousands:
+
+- Every online daemon holds one long-poll (25s) on the relay. Ten daemons is ten idle sockets.
+- Auth is stateless HMAC, so there's no user table growing with each peer.
+- All state (open tickets, presence) lives in memory on a single relay instance. A relay restart drops questions that were mid-flight, and there's no horizontal scaling. Fine for a personal setup, not a SaaS.
 
 ---
 
@@ -161,28 +161,13 @@ If you expect a counter-question, ask with a generous `timeout_seconds: 240`.
 
 | Symptom | Fix |
 |---|---|
-| `make status` shows `HTTP 401: unauthorized` | Token is stale or `RELAY_SECRET` was rotated. `make stop`, `rm ~/.agent-link/config.json`, generate a fresh invite (`make invite-bootstrap APP=<app>`), then `make join RELAY=... INVITE=...` again. |
-| `list_peers` doesn't show any peers in chat | 1) daemons running on peers? (`make status` on each) 2) did you restart Cursor / Claude Code / Codex after `join`? 3) `make logs FOLLOW=1` and look for errors. |
-| Peer stuck as offline | Peer hasn't polled the relay for >60s. Question is still queued for 24h; use `check_reply(ticket_id)` later. |
-| `make deploy` fails on `heroku CLI not found` | Install and log in: `brew install heroku` and `heroku login`, then set the remote: `heroku git:remote -a <app>`. |
-| Want to kick one machine without breaking others | `make revoke PEER=<name> APP=<app>`. Its token stops working after the relay restarts. |
+| `status` shows `HTTP 401: unauthorized` | Token is stale or `RELAY_SECRET` was rotated. Stop the daemon, delete `~/.agent-link/config.json`, mint a fresh invite (`make invite-bootstrap APP=<app>`), rejoin. |
+| `list_peers` empty in the chat | Daemons running on peers? (`npx doucopy status` on each). Did you restart Cursor / Claude Code / Codex after `join`? Check `npx doucopy logs -f`. |
+| Peer stuck as offline | Peer hasn't polled the relay for >60s. Question is still queued for 24h, use `check_reply(ticket_id)`. |
+| `make deploy` fails on `heroku CLI not found` | `brew install heroku && heroku login`, then `heroku git:remote -a <app>`. |
 | Docker relay instead of Heroku | Build with the shipped `Dockerfile`, run with `RELAY_SECRET=... PORT=3000 -p 3000:3000` and point `join` at that URL. |
 
-## Configuration reference
-
-`~/.agent-link/config.json` fields worth knowing:
-
-- `memory_sources.transcripts_glob`: JSONL agent transcripts fed to the responder.
-- `memory_sources.agents_md_roots`: repositories scanned for `AGENTS.md`.
-- `responder.harness`: one of `cursor-agent`, `claude`, `codex`. Defaults to `cursor-agent`.
-- `responder.binary`: override the CLI binary path (defaults to the harness name on PATH).
-- `responder.max_concurrent`: parallel harness runs (default 3).
-- `responder.extra_args`: extra CLI flags appended to every harness invocation.
-- `redact.literals`, `redact.patterns`: deterministic post-filter on every outgoing answer.
-
-`~/.agent-link/policy.md` is the instruction file the responder prepends to every task. Edit it to tighten what the responder is allowed to reveal.
-
-`~/.agent-link/paused.json` (managed by `make pause` / `make resume`) keeps the current pause map. Delete it to clear all pauses.
+---
 
 ## Development
 
@@ -190,6 +175,7 @@ If you expect a counter-question, ask with a generous `timeout_seconds: 240`.
 make install
 make build
 make test
-make test-watch
 make typecheck
 ```
+
+To validate the npm tarball before publishing: `npm pack` then `npm i -g ./doucopy-*.tgz`. `npm run sync-skills` mirrors `.cursor/skills/agent-link-{ask,answer,troubleshoot}` into the `skills/` directory that ships in the tarball; it runs automatically on `prepack`.

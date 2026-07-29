@@ -225,6 +225,113 @@ describe("POST /invite", () => {
   });
 });
 
+describe("POST /ask + GET /reply", () => {
+  it("rejects unauthenticated ask", async () => {
+    const ctx = makeApp();
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/ask",
+      payload: { peer: "work", question: "hi" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("rejects asking yourself", async () => {
+    const ctx = makeApp();
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/ask",
+      headers: { authorization: `Bearer ${ctx.personalToken}` },
+      payload: { peer: "personal", question: "hi" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "cannot ask yourself" });
+  });
+
+  it("returns peer_offline immediately when the responder never polled", async () => {
+    const ctx = makeApp();
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/ask",
+      headers: { authorization: `Bearer ${ctx.personalToken}` },
+      payload: { peer: "work", question: "hey?", wait_seconds: 0 },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { status: string; ticket_id: string; conversation_id: string };
+    expect(body.status).toBe("peer_offline");
+    expect(body.ticket_id).toBeTruthy();
+    expect(body.conversation_id).toBeTruthy();
+  });
+
+  it("returns answered when the responder answers before the wait window ends", async () => {
+    const ctx = makeApp();
+    await ctx.mailbox.takeNext("work", 0);
+    const asking = ctx.app.inject({
+      method: "POST",
+      url: "/ask",
+      headers: { authorization: `Bearer ${ctx.personalToken}` },
+      payload: { peer: "work", question: "hey?", wait_seconds: 5 },
+    });
+    // Race: settle the ticket as soon as it appears in the inbox.
+    const question = await ctx.mailbox.takeNext("work", 5000);
+    expect(question?.question).toBe("hey?");
+    if (question) ctx.mailbox.settle(question.ticket_id, { answer: "42" });
+    const res = await asking;
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ status: "answered", answer: "42" });
+  });
+
+  it("GET /reply returns pending until the ticket is settled, then answered, then unknown_ticket", async () => {
+    const ctx = makeApp();
+    await ctx.mailbox.takeNext("work", 0);
+    const enqueued = ctx.mailbox.enqueue("work", "personal", "hey?");
+    const pending = await ctx.app.inject({
+      method: "GET",
+      url: `/reply/${enqueued.ticket_id}?wait=0`,
+      headers: { authorization: `Bearer ${ctx.personalToken}` },
+    });
+    expect(pending.json()).toMatchObject({ status: "pending", ticket_id: enqueued.ticket_id });
+    ctx.mailbox.settle(enqueued.ticket_id, { answer: "hi back" });
+    const done = await ctx.app.inject({
+      method: "GET",
+      url: `/reply/${enqueued.ticket_id}?wait=0`,
+      headers: { authorization: `Bearer ${ctx.personalToken}` },
+    });
+    expect(done.json()).toMatchObject({ status: "answered", answer: "hi back" });
+    const gone = await ctx.app.inject({
+      method: "GET",
+      url: `/reply/${enqueued.ticket_id}?wait=0`,
+      headers: { authorization: `Bearer ${ctx.personalToken}` },
+    });
+    expect(gone.json()).toMatchObject({ status: "unknown_ticket" });
+  });
+
+  it("GET /reply with wait>0 long-polls and unblocks on settle", async () => {
+    const ctx = makeApp();
+    await ctx.mailbox.takeNext("work", 0);
+    const enqueued = ctx.mailbox.enqueue("work", "personal", "hey?");
+    const waiting = ctx.app.inject({
+      method: "GET",
+      url: `/reply/${enqueued.ticket_id}?wait=5`,
+      headers: { authorization: `Bearer ${ctx.personalToken}` },
+    });
+    setTimeout(() => ctx.mailbox.settle(enqueued.ticket_id, { answer: "late" }), 50);
+    const res = await waiting;
+    expect(res.json()).toMatchObject({ status: "answered", answer: "late" });
+  });
+
+  it("rejects an out-of-range hops on /ask", async () => {
+    const ctx = makeApp();
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/ask",
+      headers: { authorization: `Bearer ${ctx.personalToken}` },
+      payload: { peer: "work", question: "q", hops: 2 },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
 describe("GET /status", () => {
   it("reports presence, queue depth and outgoing tickets", async () => {
     const ctx = makeApp();

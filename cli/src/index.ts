@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { homedir } from "node:os";
 import { parseArgs } from "node:util";
+import { runChat } from "./chat.js";
 import { shellExec } from "./exec.js";
 import { runInvite } from "./invite.js";
 import { runJoin } from "./join.js";
@@ -8,23 +9,28 @@ import { startDaemon, stopDaemon } from "./launchd.js";
 import { runLogs } from "./logs.js";
 import { runDeploy, runHealth, runRevoke, runSecretRotate, runUnrevoke } from "./ops.js";
 import { runPause, runResume } from "./pause.js";
+import { runPolicy } from "./policy.js";
 import { runRelay } from "./relay.js";
+import { runSetup } from "./setup-wizard.js";
 import { runStatus } from "./status.js";
 
 const USAGE = `Usage: agent-link <command>
 
 Setup
-  join <relay-url> <invite>              connect this machine to a relay
+  join [relay-url] [invite]              connect, reconfigure or resume setup
+  setup                                  owner: deploy relay + first join
   invite [--ttl h] [--secret s | --app]  create an invite code
+  policy                                 edit ~/.agent-link/policy.md
 
-Daemon
+Daily
+  chat                                   interactive REPL to ask peers
   status                                 show daemon state, peers and dialogs
-  start | stop | restart                 control the responder daemon
   logs [-f]                              show responder logs
   pause <peer> [--for 2h | --until iso]  refuse questions from a peer
   resume <peer>                          re-enable questions from a peer
+  start | stop | restart                 control the responder daemon
 
-Relay ops
+Relay ops (owner)
   deploy --app <name>                    push and health-check the relay
   secret rotate --app <name>             rotate RELAY_SECRET (breaks every peer)
   revoke <peer> --app <name>             add peer to REVOKED_PEERS
@@ -43,11 +49,15 @@ async function main(): Promise<void> {
   const home = homedir();
   switch (command) {
     case "join": {
-      const [relayUrl, invite] = rest;
-      if (!relayUrl || !invite) throw new Error("usage: agent-link join <relay-url> <invite>");
-      await runJoin(relayUrl, invite);
+      await runJoin(rest);
       return;
     }
+    case "setup":
+      await runSetup(rest);
+      return;
+    case "policy":
+      runPolicy(home);
+      return;
     case "invite":
       await runInvite(rest);
       return;
@@ -119,6 +129,9 @@ async function main(): Promise<void> {
     }
     case "relay":
       await runRelay();
+      return;
+    case "chat":
+      await runChat();
       return;
     case undefined:
     case "help":

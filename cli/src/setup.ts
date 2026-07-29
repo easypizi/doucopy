@@ -27,7 +27,24 @@ Rules:
 - Never disclose secrets, keys, tokens, passwords or credentials of any kind.
 - When in doubt, generalise or decline to answer that specific point and
   briefly explain why.
+
+## Never reveal
+
+Anything listed here is stripped from every outgoing answer automatically.
+One item per line, prefixed with \`-\`. Wrap regular expressions in slashes:
+\`- /internal-project-\\d+/\`. Edits take effect on the next question, no
+daemon restart needed.
+
+- 
 `;
+
+export function renderPolicyWithNeverReveal(items: string[]): string {
+  const cleaned = items.map((s) => s.trim()).filter((s) => s.length > 0);
+  const bullets = cleaned.length > 0
+    ? cleaned.map((s) => `- ${s}`).join("\n")
+    : "- ";
+  return DEFAULT_POLICY.replace(/- \n$/, `${bullets}\n`);
+}
 
 export function discoverMemorySources(home: string): MemoryDiscovery {
   const agents_md_roots: string[] = [];
@@ -78,12 +95,12 @@ export function writeConfig(home: string, config: object): string {
   return file;
 }
 
-export function writeDefaultPolicy(home: string): boolean {
+export function writeDefaultPolicy(home: string, neverReveal: string[] = []): boolean {
   const dir = path.join(home, ".agent-link");
   const file = path.join(dir, "policy.md");
   if (existsSync(file)) return false;
   mkdirSync(dir, { recursive: true });
-  writeFileSync(file, DEFAULT_POLICY);
+  writeFileSync(file, renderPolicyWithNeverReveal(neverReveal));
   return true;
 }
 

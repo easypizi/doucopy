@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +29,12 @@ function makeConfig(dir: string): DaemonConfig {
       response_timeout_seconds: 30,
     },
   };
+}
+
+function writePolicy(dir: string, contents = "test policy"): string {
+  const p = path.join(dir, "policy.md");
+  writeFileSync(p, contents);
+  return p;
 }
 
 function question(overrides: Partial<Question> = {}): Question {
@@ -176,6 +182,35 @@ describe("createHandler", () => {
     const result = await handler(question());
     expect(result.error).toBe("boom");
     expect(store.get("conv-1")).toBeNull();
+  });
+
+  it("picks up new `## Never reveal` items from policy.md without a restart", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-handler-"));
+    const policyPath = writePolicy(dir, "You are a responder.\n");
+    process.env.FAKE_AGENT_ANSWER = "trace: BetaCorp, Gamma";
+    const config = makeConfig(dir);
+    const store = new ConversationStore(path.join(dir, "conversations.json"));
+    const handler = createHandler(config, store, policyPath);
+
+    const first = await handler(question());
+    expect(first.answer).toBe("trace: BetaCorp, Gamma");
+
+    writeFileSync(policyPath, "## Never reveal\n\n- BetaCorp\n- /Gamm[a-z]/\n");
+    process.env.FAKE_AGENT_ANSWER = "trace: BetaCorp, Gamma";
+    const second = await handler(question({ ticket_id: "t-2", conversation_id: "conv-2" }));
+    expect(second.answer).toBe("trace: [redacted], [redacted]");
+  });
+
+  it("merges legacy config.redact with policy.md Never reveal", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-handler-"));
+    const policyPath = writePolicy(dir, "## Never reveal\n\n- Zeta\n");
+    process.env.FAKE_AGENT_ANSWER = "we used Acme Corp and Zeta together";
+    const config = makeConfig(dir);
+    config.redact = { literals: ["Acme Corp"] };
+    const store = new ConversationStore(path.join(dir, "conversations.json"));
+    const handler = createHandler(config, store, policyPath);
+    const result = await handler(question());
+    expect(result.answer).toBe("we used [redacted] and [redacted] together");
   });
 
   it("redacts configured literals and built-in secrets from the outgoing answer", async () => {

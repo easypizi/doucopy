@@ -1,33 +1,57 @@
 {
-  "name": "agent-link",
-  "version": "2.0.0",
-  "description": "Connect AI agents from different accounts so one can ask the other questions answered from its own memory",
+  "name": "doucopy",
+  "version": "2.2.0",
+  "description": "Connect AI agents from different accounts (or a small trusted circle) so one can ask the other questions answered from its own memory. CLI, MCP, terminal REPL.",
   "license": "MIT",
   "type": "module",
   "engines": {
     "node": "22.x"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/easypizi/pshpsh.git"
+  },
+  "homepage": "https://github.com/easypizi/pshpsh#readme",
+  "bugs": {
+    "url": "https://github.com/easypizi/pshpsh/issues"
+  },
+  "keywords": [
+    "mcp",
+    "cursor",
+    "claude-code",
+    "codex",
+    "ai-agents",
+    "cli",
+    "cross-machine",
+    "agent-communication",
+    "doucopy",
+    "agent-link"
+  ],
   "workspaces": [
     "relay",
     "daemon",
     "cli"
   ],
   "bin": {
-    "agent-link": "cli/dist/index.js"
+    "agent-link": "cli/dist/index.js",
+    "doucopy": "cli/dist/index.js"
   },
   "files": [
     "cli/dist",
     "relay/dist",
     "daemon/dist",
     "daemon/launchd",
+    "skills",
     "app.json"
   ],
   "scripts": {
     "build": "npm run build -w relay && npm run build -w daemon && npm run build -w cli",
-    "prepack": "npm run build",
+    "sync-skills": "node scripts/sync-skills.mjs",
+    "prepack": "npm run sync-skills && npm run build",
     "test": "vitest run"
   },
   "dependencies": {
+    "@inquirer/prompts": "^7.4.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "fastify": "^5.10.0",
     "uuid": "^14.0.1",

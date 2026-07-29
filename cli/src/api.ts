@@ -65,6 +65,50 @@ export async function requestInvite(
   });
 }
 
+export type AskStatus = "answered" | "pending" | "peer_offline" | "error" | "unknown_ticket";
+
+export interface AskResult {
+  status: AskStatus;
+  ticket_id: string;
+  conversation_id: string;
+  answer?: string;
+  error?: string;
+}
+
+export interface ReplyResult {
+  status: AskStatus;
+  ticket_id: string;
+  answer?: string;
+  error?: string;
+}
+
+export async function askPeer(
+  relayUrl: string,
+  token: string,
+  input: { peer: string; question: string; wait_seconds?: number; conversation_id?: string; hops?: number },
+  fetchImpl: typeof fetch = fetch,
+): Promise<AskResult> {
+  return requestJson<AskResult>(fetchImpl, `${normalizeRelayUrl(relayUrl)}/ask`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function fetchReply(
+  relayUrl: string,
+  token: string,
+  ticketId: string,
+  waitSeconds = 0,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ReplyResult> {
+  const url = `${normalizeRelayUrl(relayUrl)}/reply/${encodeURIComponent(ticketId)}?wait=${waitSeconds}`;
+  return requestJson<ReplyResult>(fetchImpl, url, {
+    method: "GET",
+    headers: { authorization: `Bearer ${token}` },
+  });
+}
+
 export async function fetchStatus(
   relayUrl: string,
   token: string,

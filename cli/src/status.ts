@@ -1,39 +1,54 @@
-import { fetchStatus } from "./api.js";
+import { fetchStatus, type RelayStatus } from "./api.js";
+import { c, formatPeersTable, type PeerRow } from "./color.js";
 import { isDaemonRunning } from "./launchd.js";
+
+export interface PausedEntry {
+  peer: string;
+  until_ms: number | null;
+}
+
+export function buildPeerRows(status: RelayStatus, self: string, paused: PausedEntry[]): PeerRow[] {
+  const pausedSet = new Set(paused.map((p) => p.peer));
+  const rows: PeerRow[] = [];
+  rows.push({ name: self, online: status.self_online, self: true });
+  for (const peer of status.peers) {
+    if (peer.name === self) continue;
+    rows.push({ name: peer.name, online: peer.online, paused: pausedSet.has(peer.name) });
+  }
+  return rows;
+}
 
 export async function runStatus(): Promise<void> {
   const { loadConfig } = await import("../../daemon/dist/config.js");
   const { listPaused } = await import("../../daemon/dist/paused.js");
   const config = loadConfig();
-  console.log(`relay: ${config.relay_url}`);
-  console.log(`self:  ${config.self_peer}`);
-  console.log(`daemon process: ${isDaemonRunning() ? "running" : "stopped"}`);
+  console.log(c.bold("agent-link status"));
+  console.log(`  relay:  ${config.relay_url}`);
+  console.log(`  self:   ${config.self_peer}`);
+  console.log(`  daemon: ${isDaemonRunning() ? c.green("running") : c.dim("stopped")}`);
   const paused = listPaused();
-  if (paused.length > 0) {
-    console.log("paused peers:");
-    for (const p of paused) {
-      const until = p.until_ms === null ? "indefinitely" : `until ${new Date(p.until_ms).toISOString()}`;
-      console.log(`  - ${p.peer} (${until})`);
-    }
-  }
   try {
     const status = await fetchStatus(config.relay_url, config.token);
-    console.log(`daemon connected: ${status.self_online ? "yes" : "no"}`);
-    if (status.peers.length === 0) {
-      console.log("peers: (none seen yet)");
-    } else {
-      console.log("peers:");
-      for (const peer of status.peers) {
-        console.log(`  - ${peer.name} (${peer.online ? "online" : "offline"})`);
+    console.log("");
+    console.log(c.bold("peers"));
+    console.log(formatPeersTable(buildPeerRows(status, config.self_peer, paused)));
+    if (paused.length > 0) {
+      console.log("");
+      console.log(c.bold("paused"));
+      for (const p of paused) {
+        const until = p.until_ms === null ? "indefinitely" : `until ${new Date(p.until_ms).toISOString()}`;
+        console.log(`  ${c.yellow("⏸")} ${p.peer} ${c.dim(until)}`);
       }
     }
-    console.log(`incoming queued: ${status.incoming_queued}`);
     if (status.outgoing.length > 0) {
-      console.log("your open dialogs:");
+      console.log("");
+      console.log(c.bold("your open dialogs"));
       for (const t of status.outgoing) {
-        console.log(`  - ${t.to_peer} ${t.status} ${t.ticket_id}`);
+        console.log(`  → ${t.to_peer}  ${c.dim(t.status)}  ${c.dim(t.ticket_id)}`);
       }
     }
+    console.log("");
+    console.log(c.dim(`incoming queued: ${status.incoming_queued}`));
   } catch (err) {
     console.error(`could not reach the relay: ${err instanceof Error ? err.message : String(err)}`);
     process.exitCode = 1;
