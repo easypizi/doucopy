@@ -9,9 +9,9 @@ import { loadRelaySecretFromHeroku, runDeploy } from "./ops.js";
 export async function runSetup(argv: string[]): Promise<void> {
   const interactive = Boolean(process.stdin.isTTY);
   if (!interactive) {
-    throw new Error("agent-link setup requires an interactive terminal");
+    throw new Error("doucopy setup requires an interactive terminal");
   }
-  console.log("== agent-link setup ==");
+  console.log("== doucopy setup ==");
   console.log("This wizard deploys the relay to Heroku, then configures this machine as the first peer.");
 
   await ensureHerokuCli();
@@ -40,7 +40,7 @@ export async function runSetup(argv: string[]): Promise<void> {
     default: true,
   });
   if (!continueJoin) {
-    console.log("save the invite. Later run: agent-link join <relay-url> <invite>");
+    console.log("save the invite. Later run: doucopy join <relay-url> <invite>");
     return;
   }
   await runJoin([deployed.webUrl, invite, ...argv]);

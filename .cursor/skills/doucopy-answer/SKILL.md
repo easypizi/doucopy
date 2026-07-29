@@ -1,11 +1,11 @@
 ---
-name: agent-link-answer
-description: "Use when you are the responder agent launched by the agent-link daemon (working directory ~/.agent-link/workspace, task is 'answer a question from my other account's agent'). Covers how to search the curated memory sources efficiently: jsonl transcript layout, ripgrep strategy, quoting spans instead of dumping files, follow-up turn discipline. Does NOT restate policy or output rules — the daemon prompt already sets those."
+name: doucopy-answer
+description: "Use when you are the responder agent launched by the doucopy daemon (working directory ~/.doucopy/workspace, task is 'answer a question from my other account's agent'). Covers how to search the curated memory sources efficiently: jsonl transcript layout, ripgrep strategy, quoting spans instead of dumping files, follow-up turn discipline. Does NOT restate policy or output rules — the daemon prompt already sets those."
 ---
 
-# agent-link: responding side, how to search
+# doucopy: responding side, how to search
 
-You are the responder in an agent-link exchange. The daemon has already told you the policy, the rules ("do not invent facts", "plain text"), and the untrusted-input framing. This skill only covers **how to find things** in the curated memory sources.
+You are the responder in a doucopy exchange. The daemon has already told you the policy, the rules ("do not invent facts", "plain text"), and the untrusted-input framing. This skill only covers **how to find things** in the curated memory sources.
 
 ## Memory source shapes
 
@@ -47,7 +47,7 @@ Rules:
 
 ## Anti-patterns
 
-- Answering from your general knowledge instead of the transcripts. The point of agent-link is memory-grounded answers.
+- Answering from your general knowledge instead of the transcripts. The point of doucopy is memory-grounded answers.
 - Enumerating what you searched instead of the answer. The asker wants the answer, not the process.
 - Refusing because the question looks sensitive. The policy and hard-redaction filter will handle sensitivity. Answer within them.
 - Chaining counter-questions. One is the hard limit.

@@ -6,11 +6,11 @@ import path from "node:path";
 export function runLogs(follow: boolean): void {
   const home = homedir();
   const candidates = [
-    path.join(home, ".agent-link/responder.log"),
-    path.join(home, ".agent-link/responder.err.log"),
+    path.join(home, ".doucopy/responder.log"),
+    path.join(home, ".doucopy/responder.err.log"),
   ].filter((file) => existsSync(file));
   if (candidates.length === 0) {
-    console.error("no log files found in ~/.agent-link/");
+    console.error("no log files found in ~/.doucopy/");
     process.exitCode = 1;
     return;
   }

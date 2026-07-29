@@ -15,7 +15,7 @@ describe("safeDirName", () => {
 
 describe("pruneWorkspaces", () => {
   it("removes only directories older than the cutoff", () => {
-    const root = mkdtempSync(path.join(tmpdir(), "agent-link-ws-"));
+    const root = mkdtempSync(path.join(tmpdir(), "doucopy-ws-"));
     const oldDir = path.join(root, "old-conv");
     const newDir = path.join(root, "new-conv");
     mkdirSync(oldDir);
@@ -31,6 +31,6 @@ describe("pruneWorkspaces", () => {
   });
 
   it("tolerates a missing root", () => {
-    expect(pruneWorkspaces("/nonexistent/agent-link-root")).toBe(0);
+    expect(pruneWorkspaces("/nonexistent/doucopy-root")).toBe(0);
   });
 });

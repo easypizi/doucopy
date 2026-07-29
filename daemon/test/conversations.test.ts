@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { ConversationStore } from "../src/conversations.js";
 
 function tempFile(): string {
-  return path.join(mkdtempSync(path.join(tmpdir(), "agent-link-")), "conversations.json");
+  return path.join(mkdtempSync(path.join(tmpdir(), "doucopy-")), "conversations.json");
 }
 
 describe("ConversationStore", () => {

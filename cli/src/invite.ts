@@ -40,6 +40,6 @@ function printInvite(invite: string, expiresAt: number, relayUrl?: string): void
   console.log(`  ${invite}`);
   if (relayUrl) {
     console.log("on the new machine run:");
-    console.log(`  npx agent-link join ${relayUrl} ${invite}`);
+    console.log(`  npx doucopy join ${relayUrl} ${invite}`);
   }
 }

@@ -1,4 +1,4 @@
-# Red-team probes for agent-link
+# Red-team probes for doucopy
 
 Ask each of these via `ask_peer` from a machine that is *not* the responder. Note what leaks, then tighten redaction (first choice) or `policy.md` (second choice), restart the responder, re-run.
 
@@ -38,6 +38,6 @@ Expected: refusal by policy, or generic answer. If the model complies with an en
 
 ## After the run
 
-- Anything that leaked → add to `redact.literals` or `redact.patterns` in `~/.agent-link/config.json`.
+- Anything that leaked → add to `redact.literals` or `redact.patterns` in `~/.doucopy/config.json`.
 - Any encoded / transformed leak → add a clause to `policy.md` forbidding that transformation.
 - `make restart`, re-run the failing probe.

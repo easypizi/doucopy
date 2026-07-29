@@ -7,6 +7,7 @@ import { runInvite } from "./invite.js";
 import { runJoin } from "./join.js";
 import { startDaemon, stopDaemon } from "./launchd.js";
 import { runLogs } from "./logs.js";
+import { migrateLegacyHome } from "./migrate.js";
 import { runDeploy, runHealth, runRevoke, runSecretRotate, runUnrevoke } from "./ops.js";
 import { runPause, runResume } from "./pause.js";
 import { runPolicy } from "./policy.js";
@@ -14,13 +15,13 @@ import { runRelay } from "./relay.js";
 import { runSetup } from "./setup-wizard.js";
 import { runStatus } from "./status.js";
 
-const USAGE = `Usage: agent-link <command>
+const USAGE = `Usage: doucopy <command>
 
 Setup
   join [relay-url] [invite]              connect, reconfigure or resume setup
   setup                                  owner: deploy relay + first join
   invite [--ttl h] [--secret s | --app]  create an invite code
-  policy                                 edit ~/.agent-link/policy.md
+  policy                                 edit ~/.doucopy/policy.md
 
 Daily
   chat                                   interactive REPL to ask peers
@@ -47,6 +48,9 @@ function requireFlag(value: string | undefined, name: string): string {
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
   const home = homedir();
+  if (migrateLegacyHome(home)) {
+    console.log("migrated ~/.agent-link to ~/.doucopy");
+  }
   switch (command) {
     case "join": {
       await runJoin(rest);
@@ -79,7 +83,7 @@ async function main(): Promise<void> {
       return;
     case "pause": {
       const [peer, ...flags] = rest;
-      if (!peer) throw new Error("usage: agent-link pause <peer> [--for 2h | --until iso]");
+      if (!peer) throw new Error("usage: doucopy pause <peer> [--for 2h | --until iso]");
       const { values } = parseArgs({
         args: flags,
         options: { for: { type: "string" }, until: { type: "string" } },
@@ -89,7 +93,7 @@ async function main(): Promise<void> {
     }
     case "resume": {
       const [peer] = rest;
-      if (!peer) throw new Error("usage: agent-link resume <peer>");
+      if (!peer) throw new Error("usage: doucopy resume <peer>");
       await runResume(peer);
       return;
     }
@@ -100,21 +104,21 @@ async function main(): Promise<void> {
     }
     case "secret": {
       const [sub, ...subrest] = rest;
-      if (sub !== "rotate") throw new Error("usage: agent-link secret rotate --app <name>");
+      if (sub !== "rotate") throw new Error("usage: doucopy secret rotate --app <name>");
       const { values } = parseArgs({ args: subrest, options: { app: { type: "string" } } });
       await runSecretRotate({ app: requireFlag(values.app, "app"), exec: shellExec });
       return;
     }
     case "revoke": {
       const [peer, ...flags] = rest;
-      if (!peer) throw new Error("usage: agent-link revoke <peer> --app <name>");
+      if (!peer) throw new Error("usage: doucopy revoke <peer> --app <name>");
       const { values } = parseArgs({ args: flags, options: { app: { type: "string" } } });
       await runRevoke(peer, requireFlag(values.app, "app"), shellExec);
       return;
     }
     case "unrevoke": {
       const [peer, ...flags] = rest;
-      if (!peer) throw new Error("usage: agent-link unrevoke <peer> --app <name>");
+      if (!peer) throw new Error("usage: doucopy unrevoke <peer> --app <name>");
       const { values } = parseArgs({ args: flags, options: { app: { type: "string" } } });
       await runUnrevoke(peer, requireFlag(values.app, "app"), shellExec);
       return;

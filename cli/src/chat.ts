@@ -99,7 +99,7 @@ async function handleAsk(state: ChatState, question: string): Promise<void> {
   } else {
     print(
       `[still pending after ${REPLY_MAX_ATTEMPTS * REPLY_WAIT_SECONDS}s] pick it up later with:\n` +
-        `  agent-link reply ${initial.ticket_id}`,
+        `  doucopy reply ${initial.ticket_id}`,
     );
   }
 }
@@ -155,7 +155,7 @@ async function handleCommand(state: ChatState, raw: string): Promise<HandleComma
 function prompt(state: ChatState): string {
   const peer = state.peer ?? "-";
   const conv = state.conversationId ? state.conversationId.slice(0, 8) : "-";
-  return `agent-link ${state.self}→${peer} [${conv}]> `;
+  return `doucopy ${state.self}→${peer} [${conv}]> `;
 }
 
 export async function runChat(): Promise<void> {
@@ -175,7 +175,7 @@ export async function runChat(): Promise<void> {
   // Best-effort status probe so the user sees available peers up front.
   try {
     const status = await fetchStatus(state.relayUrl, state.token);
-    print(c.bold(`agent-link chat`) + c.dim(`  ${state.relayUrl}`));
+    print(c.bold(`doucopy chat`) + c.dim(`  ${state.relayUrl}`));
     await printPeersTable(state, status);
     const remotePeers = status.peers.filter((p) => p.name !== state.self);
     if (remotePeers.length === 1) {

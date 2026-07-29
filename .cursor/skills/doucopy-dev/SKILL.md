@@ -1,9 +1,9 @@
 ---
-name: agent-link-dev
-description: "Use when modifying agent-link itself: changing the relay, daemon, or CLI code, adding an MCP tool, updating the prompt or redaction logic, writing or debugging tests. Documents the repo layout, invariants that must be preserved across changes, and the test map."
+name: doucopy-dev
+description: "Use when modifying doucopy itself: changing the relay, daemon, or CLI code, adding an MCP tool, updating the prompt or redaction logic, writing or debugging tests. Documents the repo layout, invariants that must be preserved across changes, and the test map."
 ---
 
-# agent-link: contributor guide (v2)
+# doucopy: contributor guide (v2)
 
 ## Repo layout
 
@@ -20,7 +20,7 @@ relay/                fastify HTTP + MCP streamable
 
 daemon/               responder daemon
   src/
-    index.ts          bootstrap, workspace prune, signal handling
+    index.ts          bootstrap, workspace prune, signal handling, legacy home migration
     poller.ts         long-poll /inbox, up to N parallel handlers, drain()
     handler.ts        per-question orchestration, per-conversation workspace
     workspace.ts      safeDirName, pruneWorkspaces
@@ -29,10 +29,11 @@ daemon/               responder daemon
     conversations.ts  conversation_id → chatId map
     redact.ts         built-in patterns + user rules
     config.ts         config.json validation (incl. max_concurrent)
+    migrate.ts        one-time ~/.agent-link → ~/.doucopy home migration
   test/               vitest
-  launchd/            com.agent-link.responder.plist
+  launchd/            com.doucopy.responder.plist
 
-cli/                  agent-link CLI
+cli/                  doucopy CLI (bin aliases: doucopy, agent-link)
   src/
     index.ts          argv dispatcher
     api.ts            HTTP client for /join, /invite, /status
@@ -40,9 +41,10 @@ cli/                  agent-link CLI
     join.ts           end-to-end machine setup
     invite.ts         invite (server-side or --secret bootstrap)
     status.ts         daemon + relay status
-    launchd.ts        install / start / stop / detect the launchd daemon
+    launchd.ts        install / start / stop / detect the launchd daemon, legacy daemon teardown
     logs.ts           tail responder logs
-    relay.ts          run the relay via npx agent-link relay
+    migrate.ts        one-time ~/.agent-link → ~/.doucopy home migration
+    relay.ts          run the relay via npx doucopy relay
 
 Dockerfile            relay image for self-hosting
 app.json              Heroku Deploy button config
@@ -60,6 +62,7 @@ docs/superpowers/     specs, plans
 7. **`conversation_id` is opaque to the relay** — only the daemon maps it to a `cursor-agent` chat id. Keep it uuidv7-friendly.
 8. **Tokens are stateless HMAC.** Never introduce a database of peers on the relay. Revocation goes through `REVOKED_PEERS` or a `RELAY_SECRET` rotation.
 9. **Per-conversation workspaces** are created via `safeDirName(conversation_id)`. Never write to the workspace root directly, parallel `cursor-agent` runs would clobber each other's `task.md`.
+10. **Legacy home migration is a one-way rename.** `migrateLegacyHome` moves `~/.agent-link` to `~/.doucopy` only when the new path doesn't exist yet. Do not make it copy or merge, a bare `renameSync` is the whole contract.
 
 ## Test map
 
@@ -83,6 +86,7 @@ docs/superpowers/     specs, plans
 | `daemon/test/workspace.test.ts` | safeDirName, pruneWorkspaces |
 | `cli/test/api.test.ts` | HTTP client wrappers |
 | `cli/test/setup.test.ts` | memory discovery, config, policy, mcp.json merge |
+| `cli/test/join-resume.test.ts` | existing connection reuse, join-draft persistence |
 
 Integration uses `daemon/test/fixtures/fake-cursor-agent.sh`. Keep it fast and deterministic.
 
@@ -98,7 +102,7 @@ npm test
 
 1. Define it in `relay/src/mcp.ts` with a Zod input schema and a return-text-block handler.
 2. Add integration coverage in `relay/test/mcp.test.ts`.
-3. If askers should know about it, extend `agent-link-ask`.
+3. If askers should know about it, extend `doucopy-ask`.
 
 ## Prompt changes
 

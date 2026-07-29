@@ -10,7 +10,7 @@
 
 - `APP` — имя Heroku-приложения (у меня по умолчанию `mcp-ivan-connector`).
 - `RELAY` — URL задеплоенного relay, `https://<APP>-XXXX.herokuapp.com`. Точный адрес печатается после `make deploy` и в `heroku apps:info -a <APP>`.
-- Пакет опубликован в npm как `doucopy`. Бинарник называется `agent-link` (и `doucopy`, как алиас), запуск без установки: `npx doucopy ...`.
+- Пакет опубликован в npm как `doucopy`. Бинарник называется `doucopy` (алиас `agent-link` остался для тех, кто ставил под старым именем), запуск без установки: `npx doucopy ...`.
 - Требования: Node.js 22.x, macOS (для демона-респондера), один из CLI: `cursor-agent`, `claude` или `codex` в PATH (если хочешь отвечать, а не только спрашивать).
 
 ---
@@ -71,12 +71,12 @@ npx doucopy join <RELAY> <invite>
 - ставить ли скиллы глобально,
 - слова которые ответчик не должен выдавать (пиши через запятую, Enter — пропустить).
 
-Дальше визард сам записывает `~/.agent-link/config.json`, `~/.agent-link/policy.md`, мерджит MCP-конфиги выбранных клиентов, ставит и запускает демона (если выбран респондер) и ждёт `online`. Перезапусти свой AI-клиент.
+Дальше визард сам записывает `~/.doucopy/config.json`, `~/.doucopy/policy.md`, мерджит MCP-конфиги выбранных клиентов, ставит и запускает демона (если выбран респондер) и ждёт `online`. Перезапусти свой AI-клиент.
 
 Повторный запуск. `npx doucopy join` (или `make join` в чекауте) можно вызывать без аргументов сколько угодно раз:
 
 - Если машина уже подключена — визард предлагает переиспользовать существующего пира и токен, проведя только через askers / responder / skills / policy заново.
-- Если предыдущий запуск прервали после ввода URL и invite — они предзаполнятся из черновика `~/.agent-link/join-draft.json` (TTL 48h, удаляется при успехе).
+- Если предыдущий запуск прервали после ввода URL и invite — они предзаполнятся из черновика `~/.doucopy/join-draft.json` (TTL 48h, удаляется при успехе).
 
 Неинтерактивно (для скриптов):
 
@@ -122,7 +122,7 @@ npx doucopy resume work-mbp
 
 ### Один файл фильтра — policy.md
 
-`~/.agent-link/policy.md` — единственное место, где ты рулишь тем что ответчик может и не может говорить:
+`~/.doucopy/policy.md` — единственное место, где ты рулишь тем что ответчик может и не может говорить:
 
 - Верх файла — инструкция LLM.
 - Секция `## Never reveal` — жёсткая пост-фильтрация в коде демона (после LLM). Буллеты — регистронезависимые литералы, `/pattern/` — регулярки.
@@ -137,7 +137,7 @@ npx doucopy resume work-mbp
 
 ## Диагностика
 
-- `npx doucopy status` показывает `HTTP 401: unauthorized` — токен протух или ротирован `RELAY_SECRET`. Удали `~/.agent-link/config.json`, возьми новый инвайт (`make invite-bootstrap APP=<APP>`), заново `npx doucopy join`.
+- `npx doucopy status` показывает `HTTP 401: unauthorized` — токен протух или ротирован `RELAY_SECRET`. Удали `~/.doucopy/config.json`, возьми новый инвайт (`make invite-bootstrap APP=<APP>`), заново `npx doucopy join`.
 - `list_peers` не видит никого — проверь что демон запущен на обоих концах (`npx doucopy status`), проверь что AI-клиент перезапущен после `join`, посмотри `npx doucopy logs -f`.
 - Пир висит offline — он не пинговал relay >60с. Вопрос всё ещё в очереди 24 часа, забери позже через `check_reply`.
 - `make deploy` жалуется на heroku CLI — `brew install heroku && heroku login`, потом `heroku git:remote -a <APP>`.

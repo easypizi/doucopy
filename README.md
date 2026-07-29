@@ -2,7 +2,7 @@
 
 Two AI agents. Different accounts. Same person (or a small trusted circle). One can ask the other about anything already in the other's chat history, notes and code — and get an answer written by that other agent.
 
-Published to npm as **`doucopy`**. The binary is still called `agent-link` (both `agent-link` and `doucopy` work as commands).
+Published to npm as **`doucopy`**. The `agent-link` bin alias still works too, for anyone who installed it under the old name.
 
 Two moving parts:
 
@@ -39,8 +39,8 @@ The wizard asks:
 Then, without asking:
 
 - exchanges the invite for a peer token,
-- writes `~/.agent-link/config.json` and `~/.agent-link/policy.md`,
-- merges an `agent-link` entry into the MCP config of every chosen client,
+- writes `~/.doucopy/config.json` and `~/.doucopy/policy.md`,
+- merges a `doucopy` entry into the MCP config of every chosen client,
 - (unless asker-only) installs and starts the `launchd` responder daemon and waits until it reports online.
 
 **Restart your coding agent (Cursor / Claude Code / Codex)** so it picks up the new MCP server.
@@ -48,7 +48,7 @@ Then, without asking:
 **Resuming the wizard.** Run `npx doucopy join` (or `make join` in a repo checkout) without arguments any time:
 
 - If this machine is already connected, the wizard offers to reuse the existing peer and token and just walks through askers / responder / skills / policy again.
-- If a previous run was interrupted after you typed the relay URL and invite, they're prefilled on the next attempt (draft stored in `~/.agent-link/join-draft.json`, TTL 48h, deleted on success).
+- If a previous run was interrupted after you typed the relay URL and invite, they're prefilled on the next attempt (draft stored in `~/.doucopy/join-draft.json`, TTL 48h, deleted on success).
 
 Non-interactive form for scripts:
 
@@ -122,7 +122,7 @@ check_reply(ticket_id="…")
 ```bash
 npx doucopy chat                      # interactive REPL: colored peers table, /use <peer>, then type
 npx doucopy status                    # daemon, peers, dialogs, paused peers, coloured status
-npx doucopy policy                    # opens ~/.agent-link/policy.md in $EDITOR
+npx doucopy policy                    # opens ~/.doucopy/policy.md in $EDITOR
 npx doucopy logs -f                   # tail the responder log
 npx doucopy pause work-mbp --for 2h   # refuse questions from a peer
 npx doucopy resume work-mbp
@@ -134,7 +134,7 @@ Every command has a `make` alias for a repo checkout: `make chat`, `make status`
 
 ### The single filter: policy.md
 
-`~/.agent-link/policy.md` is the one place to control the responder:
+`~/.doucopy/policy.md` is the one place to control the responder:
 
 - The top of the file is the instruction prepended to every task the responder runs.
 - The `## Never reveal` section is a deterministic post-filter that runs in daemon code (outside the LLM), stripping matches from every outgoing `answer` and `error`. Bullet lines are case-insensitive literals; slash-wrapped bullets are regex (`- /internal-project-\d+/`).
@@ -161,7 +161,7 @@ The relay is designed for a small circle of trusted machines, tens rather than t
 
 | Symptom | Fix |
 |---|---|
-| `status` shows `HTTP 401: unauthorized` | Token is stale or `RELAY_SECRET` was rotated. Stop the daemon, delete `~/.agent-link/config.json`, mint a fresh invite (`make invite-bootstrap APP=<app>`), rejoin. |
+| `status` shows `HTTP 401: unauthorized` | Token is stale or `RELAY_SECRET` was rotated. Stop the daemon, delete `~/.doucopy/config.json`, mint a fresh invite (`make invite-bootstrap APP=<app>`), rejoin. |
 | `list_peers` empty in the chat | Daemons running on peers? (`npx doucopy status` on each). Did you restart Cursor / Claude Code / Codex after `join`? Check `npx doucopy logs -f`. |
 | Peer stuck as offline | Peer hasn't polled the relay for >60s. Question is still queued for 24h, use `check_reply(ticket_id)`. |
 | `make deploy` fails on `heroku CLI not found` | `brew install heroku && heroku login`, then `heroku git:remote -a <app>`. |
@@ -178,4 +178,4 @@ make test
 make typecheck
 ```
 
-To validate the npm tarball before publishing: `npm pack` then `npm i -g ./doucopy-*.tgz`. `npm run sync-skills` mirrors `.cursor/skills/agent-link-{ask,answer,troubleshoot}` into the `skills/` directory that ships in the tarball; it runs automatically on `prepack`.
+To validate the npm tarball before publishing: `npm pack` then `npm i -g ./doucopy-*.tgz`. `npm run sync-skills` mirrors `.cursor/skills/doucopy-{ask,answer,troubleshoot}` into the `skills/` directory that ships in the tarball; it runs automatically on `prepack`.

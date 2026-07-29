@@ -43,7 +43,7 @@ export function expandHome(p: string): string {
   return p.startsWith("~/") ? path.join(homedir(), p.slice(2)) : p;
 }
 
-export function loadConfig(filePath = "~/.agent-link/config.json"): DaemonConfig {
+export function loadConfig(filePath = "~/.doucopy/config.json"): DaemonConfig {
   const config = JSON.parse(readFileSync(expandHome(filePath), "utf8")) as DaemonConfig;
   for (const key of ["relay_url", "self_peer", "token"] as const) {
     if (!config[key]) throw new Error(`config: missing ${key}`);

@@ -78,7 +78,7 @@ export function defaultConfig(
     },
     responder: {
       cursor_agent_binary: "cursor-agent",
-      workspace_dir: "~/.agent-link/workspace",
+      workspace_dir: "~/.doucopy/workspace",
       response_timeout_seconds: 300,
       max_concurrent: 3,
       model: "composer-2.5",
@@ -88,7 +88,7 @@ export function defaultConfig(
 }
 
 export function writeConfig(home: string, config: object): string {
-  const dir = path.join(home, ".agent-link");
+  const dir = path.join(home, ".doucopy");
   mkdirSync(dir, { recursive: true });
   const file = path.join(dir, "config.json");
   writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
@@ -96,7 +96,7 @@ export function writeConfig(home: string, config: object): string {
 }
 
 export function writeDefaultPolicy(home: string, neverReveal: string[] = []): boolean {
-  const dir = path.join(home, ".agent-link");
+  const dir = path.join(home, ".doucopy");
   const file = path.join(dir, "policy.md");
   if (existsSync(file)) return false;
   mkdirSync(dir, { recursive: true });
@@ -190,7 +190,10 @@ function writeMcpJson(file: string, relayUrl: string, token: string, strictParse
     writeFileSync(`${file}.bak`, raw);
   }
   if (!data.mcpServers || typeof data.mcpServers !== "object") data.mcpServers = {};
-  data.mcpServers["agent-link"] = {
+  // Drop the legacy key from the agent-link days so a machine that upgrades
+  // doesn't end up with two MCP servers pointed at the same relay.
+  delete data.mcpServers["agent-link"];
+  data.mcpServers["doucopy"] = {
     type: "http",
     url: `${relayUrl.replace(/\/+$/, "")}/mcp`,
     headers: { Authorization: `Bearer ${token}` },
@@ -210,7 +213,7 @@ export function mergeClaudeMcp(home: string, relayUrl: string, token: string): s
   return file;
 }
 
-// Merges the [mcp_servers.agent-link] block into ~/.codex/config.toml.
+// Merges the [mcp_servers.doucopy] block into ~/.codex/config.toml.
 // A line-based parser is used instead of a regex so section bodies that
 // contain "[" (e.g. TOML arrays like `enabled_tools = ["x"]`) aren't cut
 // short. The section runs from its header up to the next line that starts
@@ -221,7 +224,7 @@ export function mergeCodexToml(home: string, relayUrl: string, token: string): s
   mkdirSync(dir, { recursive: true });
   const url = `${relayUrl.replace(/\/+$/, "")}/mcp`;
   const block = [
-    "[mcp_servers.agent-link]",
+    "[mcp_servers.doucopy]",
     `url = "${url}"`,
     `bearer_token = "${token}"`,
   ];
@@ -230,23 +233,30 @@ export function mergeCodexToml(home: string, relayUrl: string, token: string): s
     existing = readFileSync(file, "utf8");
     writeFileSync(`${file}.bak`, existing);
   }
-  const merged = replaceCodexAgentLinkSection(existing, block);
+  // Drop the legacy agent-link section first (upgrade path), then merge in
+  // the current doucopy one.
+  const withoutLegacy = replaceDoucopyMcpSection(existing, null, "[mcp_servers.agent-link]");
+  const merged = replaceDoucopyMcpSection(withoutLegacy, block, "[mcp_servers.doucopy]");
   writeFileSync(file, merged.endsWith("\n") ? merged : `${merged}\n`, { mode: 0o600 });
   return file;
 }
 
-// Exported for tests. Splits `input` into lines, finds
-// `[mcp_servers.agent-link]`, drops everything until the next header line
-// (starts with "["), then splices in `blockLines`. Preserves neighbouring
-// blank lines. If the section is absent, appends the block with a blank line
-// separator.
-export function replaceCodexAgentLinkSection(input: string, blockLines: string[]): string {
-  const HEADER = "[mcp_servers.agent-link]";
+// Exported for tests. Splits `input` into lines, finds `header`, drops
+// everything until the next header line (starts with "["), then splices in
+// `blockLines` (or removes the section entirely when `blockLines` is null).
+// Preserves neighbouring blank lines. If the section is absent and
+// `blockLines` is provided, appends the block with a blank line separator.
+export function replaceDoucopyMcpSection(
+  input: string,
+  blockLines: string[] | null,
+  header = "[mcp_servers.doucopy]",
+): string {
   const lines = input.length === 0 ? [] : input.split("\n");
   // Split may leave a trailing empty string when input ends with "\n"; keep it
   // for round-trip stability.
-  const start = lines.findIndex((line) => line.trim() === HEADER);
+  const start = lines.findIndex((line) => line.trim() === header);
   if (start === -1) {
+    if (blockLines === null) return input;
     const trimmed = lines.length > 0 && lines[lines.length - 1] === "" ? lines.slice(0, -1) : lines;
     if (trimmed.length === 0) return `${blockLines.join("\n")}\n`;
     return `${trimmed.join("\n")}\n\n${blockLines.join("\n")}\n`;
@@ -257,6 +267,15 @@ export function replaceCodexAgentLinkSection(input: string, blockLines: string[]
   }
   const before = lines.slice(0, start);
   const after = lines.slice(end);
+  if (blockLines === null) {
+    const parts: string[] = [];
+    if (before.length > 0) parts.push(before.join("\n").replace(/\n+$/, ""));
+    const rest = after.join("\n").replace(/^\n+/, "");
+    if (rest.length > 0) parts.push(rest);
+    if (parts.length === 0) return "";
+    const joined = parts.join("\n\n");
+    return joined.endsWith("\n") ? joined : `${joined}\n`;
+  }
   const parts: string[] = [];
   if (before.length > 0) parts.push(before.join("\n").replace(/\n+$/, ""));
   parts.push(blockLines.join("\n"));

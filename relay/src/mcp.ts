@@ -21,7 +21,7 @@ export function buildMcpServer(
 ): McpServer {
   const keepaliveIntervalMs = options?.keepaliveIntervalMs ?? KEEPALIVE_INTERVAL_MS;
   const server = new McpServer(
-    { name: "agent-link", version: "2.0.0" },
+    { name: "doucopy", version: "2.0.0" },
     { capabilities: { logging: {} } },
   );
 

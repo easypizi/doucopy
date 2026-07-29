@@ -53,13 +53,13 @@ describe("installGlobalSkills", () => {
     const home = makeHome();
     const source = makeSourceDir();
     installGlobalSkills({ home, clients: ["cursor"], sourceDir: source });
-    const target = path.join(home, ".cursor/skills", "agent-link-ask/SKILL.md");
-    writeFileSync(path.join(source, "agent-link-ask/SKILL.md"), "# agent-link-ask\nversion 2\n");
+    const target = path.join(home, ".cursor/skills", "doucopy-ask/SKILL.md");
+    writeFileSync(path.join(source, "doucopy-ask/SKILL.md"), "# doucopy-ask\nversion 2\n");
     const result = installGlobalSkills({ home, clients: ["cursor"], sourceDir: source });
     expect(readFileSync(target, "utf8")).toContain("version 2");
     const bySkill = new Map(result.map((r) => [r.skill, r.status]));
-    expect(bySkill.get("agent-link-ask")).toBe("updated");
-    expect(bySkill.get("agent-link-answer")).toBe("unchanged");
+    expect(bySkill.get("doucopy-ask")).toBe("updated");
+    expect(bySkill.get("doucopy-answer")).toBe("unchanged");
   });
 
   it("areAllSkillsInstalled reflects fresh, stale and missing states", () => {
@@ -68,7 +68,7 @@ describe("installGlobalSkills", () => {
     expect(areAllSkillsInstalled(home, ["cursor"], source)).toBe(false);
     installGlobalSkills({ home, clients: ["cursor"], sourceDir: source });
     expect(areAllSkillsInstalled(home, ["cursor"], source)).toBe(true);
-    writeFileSync(path.join(source, "agent-link-ask/SKILL.md"), "changed");
+    writeFileSync(path.join(source, "doucopy-ask/SKILL.md"), "changed");
     expect(areAllSkillsInstalled(home, ["cursor"], source)).toBe(false);
     // Empty client list is trivially satisfied.
     expect(areAllSkillsInstalled(home, [], source)).toBe(true);
@@ -78,15 +78,25 @@ describe("installGlobalSkills", () => {
     const home = makeHome();
     const source = mkdtempSync(path.join(tmpdir(), "doucopy-skills-empty-"));
     // Only one skill exists in source.
-    mkdirSync(path.join(source, "agent-link-ask"), { recursive: true });
-    writeFileSync(path.join(source, "agent-link-ask/SKILL.md"), "x");
+    mkdirSync(path.join(source, "doucopy-ask"), { recursive: true });
+    writeFileSync(path.join(source, "doucopy-ask/SKILL.md"), "x");
     const installed = installGlobalSkills({ home, clients: ["cursor"], sourceDir: source });
-    expect(installed.map((s) => s.skill)).toEqual(["agent-link-ask"]);
+    expect(installed.map((s) => s.skill)).toEqual(["doucopy-ask"]);
   });
 
   it("returns an empty list when no clients are picked", () => {
     const home = makeHome();
     const source = makeSourceDir();
     expect(installGlobalSkills({ home, clients: [], sourceDir: source })).toEqual([]);
+  });
+
+  it("removes legacy agent-link-* skill copies on install (upgrade cleanup)", () => {
+    const home = makeHome();
+    const source = makeSourceDir();
+    const legacyDir = path.join(home, ".cursor/skills/agent-link-ask");
+    mkdirSync(legacyDir, { recursive: true });
+    writeFileSync(path.join(legacyDir, "SKILL.md"), "stale");
+    installGlobalSkills({ home, clients: ["cursor"], sourceDir: source });
+    expect(existsSync(legacyDir)).toBe(false);
   });
 });

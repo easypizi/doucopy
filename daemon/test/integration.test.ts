@@ -53,7 +53,7 @@ describe("full cycle: MCP ask_peer -> daemon -> answer", () => {
     if (typeof address === "string" || address === null) throw new Error("no port");
     baseUrl = `http://127.0.0.1:${address.port}`;
 
-    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-e2e-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-e2e-"));
     logFile = path.join(dir, "args.log");
     process.env.FAKE_AGENT_LOG = logFile;
     workspaceDir = path.join(dir, "workspace");

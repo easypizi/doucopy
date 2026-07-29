@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { parsePolicy, readPolicy } from "../src/policy.js";
 
 function tmpFile(contents: string): string {
-  const dir = mkdtempSync(path.join(tmpdir(), "agent-link-policy-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "doucopy-policy-"));
   const file = path.join(dir, "policy.md");
   writeFileSync(file, contents);
   return file;

@@ -1,15 +1,15 @@
 ---
-name: agent-link-ask
-description: "Use when asking another machine's agent something via agent-link (ask_peer, list_peers, check_reply MCP tools). Covers picking a peer, writing a self-contained question, choosing timeout_seconds, handling all four response statuses, follow-ups via conversation_id, and recovering timed-out answers with check_reply. When running inside ~/.agent-link/workspace you are the responder, use agent-link-answer for the general workflow — the only exception is a single counter-question (see Guard)."
+name: doucopy-ask
+description: "Use when asking another machine's agent something via doucopy (ask_peer, list_peers, check_reply MCP tools). Covers picking a peer, writing a self-contained question, choosing timeout_seconds, handling all four response statuses, follow-ups via conversation_id, and recovering timed-out answers with check_reply. When running inside ~/.doucopy/workspace you are the responder, use doucopy-answer for the general workflow — the only exception is a single counter-question (see Guard)."
 ---
 
-# agent-link: asking side
+# doucopy: asking side
 
-You are on the **asking** side of an agent-link pair. Your job is to formulate a question the other machine's agent can answer from its own memory, dispatch it via the `ask_peer` MCP tool, and interpret the reply.
+You are on the **asking** side of a doucopy pair. Your job is to formulate a question the other machine's agent can answer from its own memory, dispatch it via the `ask_peer` MCP tool, and interpret the reply.
 
 ## Guard: are you actually the asker?
 
-If your current working directory is under `~/.agent-link/workspace`, you are the **responder** launched by the local daemon. The default answer is: switch to `agent-link-answer` and do NOT call `ask_peer`.
+If your current working directory is under `~/.doucopy/workspace`, you are the **responder** launched by the local daemon. The default answer is: switch to `doucopy-answer` and do NOT call `ask_peer`.
 
 There is exactly one exception. If, and only if, you need a clarifying fact from the asker to answer their question, you may make a **single** counter-question call:
 
@@ -58,7 +58,7 @@ The responding machine pays for its own `cursor-agent` tokens on every question.
 
 Since v2.1 the responder may fire back a clarifying question at you via `ask_peer` with `hops=1` and the same `conversation_id`. Your local daemon answers it from **your** memory sources, not from a live chat. So:
 
-- Keep your own transcripts and AGENTS.md in `~/.agent-link/config.json`, otherwise the counter-question will get a useless answer.
+- Keep your own transcripts and AGENTS.md in `~/.doucopy/config.json`, otherwise the counter-question will get a useless answer.
 - Depth is capped: `hops` can only be 0 (initial) or 1 (counter). No infinite ping-pong.
 - Each conversation is capped at 4 open tickets simultaneously (relay returns `too many open tickets` if you spam it).
 - The counter-question cycle eats into your `timeout_seconds` budget. If you set 120s and the counter-question itself waits 60s, you have 60s left for the final answer. Increase `timeout_seconds` to 240s if you expect a counter-question.

@@ -50,14 +50,14 @@ function question(overrides: Partial<Question> = {}): Question {
   };
 }
 
-const SAVED_ENV_KEYS = ["FAKE_AGENT_LOG", "FAKE_AGENT_MODE", "FAKE_AGENT_ANSWER", "AGENT_LINK_PAUSED_FILE"] as const;
+const SAVED_ENV_KEYS = ["FAKE_AGENT_LOG", "FAKE_AGENT_MODE", "FAKE_AGENT_ANSWER", "DOUCOPY_PAUSED_FILE"] as const;
 let savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
   savedEnv = {};
   for (const key of SAVED_ENV_KEYS) savedEnv[key] = process.env[key];
-  process.env.AGENT_LINK_PAUSED_FILE = path.join(
-    mkdtempSync(path.join(tmpdir(), "agent-link-paused-")),
+  process.env.DOUCOPY_PAUSED_FILE = path.join(
+    mkdtempSync(path.join(tmpdir(), "doucopy-paused-")),
     "paused.json",
   );
 });
@@ -71,7 +71,7 @@ afterEach(() => {
 
 describe("createHandler", () => {
   it("does not bind the conversation to a chat when the run fails, so a retry starts a fresh first turn", async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-handler-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-handler-"));
     const logFile = path.join(dir, "args.log");
     process.env.FAKE_AGENT_LOG = logFile;
     process.env.FAKE_AGENT_MODE = "fail";
@@ -101,7 +101,7 @@ describe("createHandler", () => {
   });
 
   it("keeps two conversations in separate workspace directories", async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-handler-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-handler-"));
     process.env.FAKE_AGENT_MODE = "ok";
     const config = makeConfig(dir);
     const store = new ConversationStore(path.join(dir, "conversations.json"));
@@ -117,7 +117,7 @@ describe("createHandler", () => {
   });
 
   it("returns a paused error without running cursor-agent when the asker is paused", async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-handler-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-handler-"));
     const logFile = path.join(dir, "args.log");
     process.env.FAKE_AGENT_LOG = logFile;
     process.env.FAKE_AGENT_MODE = "ok";
@@ -133,7 +133,7 @@ describe("createHandler", () => {
   });
 
   it("uses the injected harness across a two-turn dialog (first task then follow-up)", async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-handler-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-handler-"));
     interface Call { kind: "first" | "followup"; opts: HarnessOptions; sessionId?: string; task: string }
     const calls: Call[] = [];
     const fake: Harness = {
@@ -166,7 +166,7 @@ describe("createHandler", () => {
   });
 
   it("does not persist a session id when the injected harness returns an error", async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-handler-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-handler-"));
     const fake: Harness = {
       kind: "cursor-agent",
       async runFirstTask(): Promise<HarnessResult> {
@@ -185,7 +185,7 @@ describe("createHandler", () => {
   });
 
   it("picks up new `## Never reveal` items from policy.md without a restart", async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-handler-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-handler-"));
     const policyPath = writePolicy(dir, "You are a responder.\n");
     process.env.FAKE_AGENT_ANSWER = "trace: BetaCorp, Gamma";
     const config = makeConfig(dir);
@@ -202,7 +202,7 @@ describe("createHandler", () => {
   });
 
   it("merges legacy config.redact with policy.md Never reveal", async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-handler-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-handler-"));
     const policyPath = writePolicy(dir, "## Never reveal\n\n- Zeta\n");
     process.env.FAKE_AGENT_ANSWER = "we used Acme Corp and Zeta together";
     const config = makeConfig(dir);
@@ -214,7 +214,7 @@ describe("createHandler", () => {
   });
 
   it("redacts configured literals and built-in secrets from the outgoing answer", async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-handler-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-handler-"));
     process.env.FAKE_AGENT_ANSWER =
       "I worked on Acme Corp with key sk-abcdefghij0123456789 last quarter.";
 

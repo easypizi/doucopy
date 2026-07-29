@@ -11,7 +11,7 @@ const TASK_INSTRUCTION =
   "Read the file task.md in this workspace and follow the instructions in it.";
 
 function makeOpts(): RunnerOptions & { logFile: string } {
-  const dir = mkdtempSync(path.join(tmpdir(), "agent-link-run-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "doucopy-run-"));
   return {
     binary: FIXTURE,
     workspaceDir: path.join(dir, "workspace"),

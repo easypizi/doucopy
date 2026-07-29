@@ -1,10 +1,19 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { packageRoot } from "./launchd.js";
 
 // User-facing skills we ship. The maintainer-only ones (dev, relay, privacy,
 // setup) stay inside the repo and are never installed into a user's home.
 export const SHIPPED_SKILLS = [
+  "doucopy-ask",
+  "doucopy-answer",
+  "doucopy-troubleshoot",
+] as const;
+
+// Names these skills shipped under before the agent-link → doucopy rename.
+// Removed from the target dir on every install so an upgrade doesn't leave
+// two copies of the same skill (old and new name) active at once.
+const LEGACY_SKILLS = [
   "agent-link-ask",
   "agent-link-answer",
   "agent-link-troubleshoot",
@@ -96,6 +105,9 @@ export function installGlobalSkills(opts: InstallSkillsOptions): InstalledSkill[
   for (const client of opts.clients) {
     const dst = targetDir(opts.home, client);
     mkdirSync(dst, { recursive: true });
+    for (const legacy of LEGACY_SKILLS) {
+      rmSync(path.join(dst, legacy), { recursive: true, force: true });
+    }
     for (const skill of SHIPPED_SKILLS) {
       const from = path.join(source, skill);
       if (!existsSync(from)) continue;

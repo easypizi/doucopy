@@ -44,9 +44,9 @@ describe("buildFirstTask", () => {
     expect(task).toContain("trace back to a source");
   });
 
-  it("mentions the agent-link-answer skill as the search-method reference", () => {
+  it("mentions the doucopy-answer skill as the search-method reference", () => {
     const task = buildFirstTask("Do not share secrets.", "What have I done?", MEMORY, CTX);
-    expect(task).toContain("agent-link-answer");
+    expect(task).toContain("doucopy-answer");
   });
 
   it("offers a counter-question path when hops=0", () => {
@@ -90,9 +90,9 @@ describe("buildFollowupTask", () => {
     expect(task).toContain("built-in Cursor Memories");
   });
 
-  it("mentions the agent-link-answer skill on follow-ups", () => {
+  it("mentions the doucopy-answer skill on follow-ups", () => {
     const task = buildFollowupTask("Do not share secrets.", "Anything else?", CTX);
-    expect(task).toContain("agent-link-answer");
+    expect(task).toContain("doucopy-answer");
   });
 
   it("forbids counter-questions on follow-ups when hops>=1", () => {

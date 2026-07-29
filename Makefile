@@ -41,7 +41,7 @@ chat: build ##U Interactive terminal REPL for asking peers
 status: build ##U Show daemon, peers, dialogs and paused peers
 	$(CLI) status
 
-policy: build ##U Edit ~/.agent-link/policy.md (LLM rules + Never reveal filter)
+policy: build ##U Edit ~/.doucopy/policy.md (LLM rules + Never reveal filter)
 	$(CLI) policy
 
 logs: build ##U Show responder logs. FOLLOW=1 to stream

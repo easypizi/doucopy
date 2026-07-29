@@ -1,9 +1,9 @@
 ---
-name: agent-link-privacy
+name: doucopy-privacy
 description: "Use when tightening what the responder is allowed to reveal, adjusting redact.literals / redact.patterns / policy.md, narrowing memory_sources, or red-teaming your own setup with ask_peer. Explains the two-layer model and which rule belongs in which layer."
 ---
 
-# agent-link: privacy tuning
+# doucopy: privacy tuning
 
 ## Two layers, different strength
 
@@ -14,7 +14,7 @@ description: "Use when tightening what the responder is allowed to reveal, adjus
 - Built-in patterns always on: OpenAI-style `sk-*`, GitHub PATs (`ghp_*`, `github_pat_*`), AWS access key IDs (`AKIA*`), Slack tokens (`xox[baprs]-*`), JWTs (three-segment `eyJ...`), PEM private key blocks.
 - Every match is replaced with the literal string `[redacted]`.
 
-**Soft (probabilistic).** `~/.agent-link/policy.md` is injected into the responder prompt with an untrusted-input framing (`daemon/src/prompt.ts:7-15`). Good models follow it well, but it is an instruction to an LLM, not a mechanism.
+**Soft (probabilistic).** `~/.doucopy/policy.md` is injected into the responder prompt with an untrusted-input framing (`daemon/src/prompt.ts:7-15`). Good models follow it well, but it is an instruction to an LLM, not a mechanism.
 
 ## Which rule belongs where
 

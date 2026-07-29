@@ -14,7 +14,7 @@ function makeHome(): string {
 }
 
 function writeConfig(home: string, config: Record<string, unknown>): void {
-  const dir = path.join(home, ".agent-link");
+  const dir = path.join(home, ".doucopy");
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, "config.json"), JSON.stringify(config));
 }
@@ -42,8 +42,8 @@ describe("readExistingConnection", () => {
 
   it("returns null when the config file is not valid JSON", () => {
     const home = makeHome();
-    mkdirSync(path.join(home, ".agent-link"), { recursive: true });
-    writeFileSync(path.join(home, ".agent-link/config.json"), "not json");
+    mkdirSync(path.join(home, ".doucopy"), { recursive: true });
+    writeFileSync(path.join(home, ".doucopy/config.json"), "not json");
     expect(readExistingConnection(home)).toBeNull();
   });
 });
@@ -61,15 +61,15 @@ describe("join draft", () => {
     writeDraft(home, "https://r.example", "ali1.eyJ", 0);
     const stale = 49 * 60 * 60 * 1000;
     expect(readDraft(home, stale)).toBeNull();
-    expect(existsSync(path.join(home, ".agent-link/join-draft.json"))).toBe(false);
+    expect(existsSync(path.join(home, ".doucopy/join-draft.json"))).toBe(false);
   });
 
   it("returns null and deletes a draft with bad shape", () => {
     const home = makeHome();
-    mkdirSync(path.join(home, ".agent-link"), { recursive: true });
-    writeFileSync(path.join(home, ".agent-link/join-draft.json"), "{}");
+    mkdirSync(path.join(home, ".doucopy"), { recursive: true });
+    writeFileSync(path.join(home, ".doucopy/join-draft.json"), "{}");
     expect(readDraft(home)).toBeNull();
-    expect(existsSync(path.join(home, ".agent-link/join-draft.json"))).toBe(false);
+    expect(existsSync(path.join(home, ".doucopy/join-draft.json"))).toBe(false);
   });
 
   it("clearDraft is a no-op when the file is not present", () => {
@@ -81,6 +81,6 @@ describe("join draft", () => {
     const home = makeHome();
     writeDraft(home, "https://r.example", "ali1.eyJ");
     clearDraft(home);
-    expect(existsSync(path.join(home, ".agent-link/join-draft.json"))).toBe(false);
+    expect(existsSync(path.join(home, ".doucopy/join-draft.json"))).toBe(false);
   });
 });

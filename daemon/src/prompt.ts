@@ -31,7 +31,7 @@ function counterQuestionSection(ctx: QuestionContext): string[] {
   }
   return [
     "## Counter-questions (optional)",
-    `If the question is ambiguous and you have MCP access to the agent-link tools,`,
+    `If the question is ambiguous and you have MCP access to the doucopy tools,`,
     `you may ask ONE clarifying question back to the asker via ask_peer with:`,
     `- peer: "${ctx.fromPeer}"`,
     `- conversation_id: "${ctx.conversationId}"`,
@@ -72,7 +72,7 @@ export function buildFirstTask(
     "",
     "You may also use your own built-in Cursor Memories and any read-only tools",
     "available in this session (codebase search, file read, etc.) to gather facts.",
-    "If the `agent-link-answer` skill is available, follow it for the search method.",
+    "If the `doucopy-answer` skill is available, follow it for the search method.",
     "",
     ...counterQuestionSection(ctx),
     "## Rules",
@@ -98,7 +98,7 @@ export function buildFollowupTask(policy: string, question: string, ctx: Questio
     "You may keep using the curated sources from the first turn plus your own",
     "built-in Cursor Memories and read-only tools. Every fact must trace back to",
     "a source you actually consulted.",
-    "If the `agent-link-answer` skill is available, follow it for the search method.",
+    "If the `doucopy-answer` skill is available, follow it for the search method.",
     "",
     ...counterQuestionSection(ctx),
     "Reply with the final answer as plain text, no preamble.",

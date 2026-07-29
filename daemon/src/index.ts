@@ -1,15 +1,20 @@
+import { homedir } from "node:os";
 import { expandHome, loadConfig } from "./config.js";
 import { ConversationStore } from "./conversations.js";
 import { createHandler } from "./handler.js";
+import { migrateLegacyHome } from "./migrate.js";
 import { Poller } from "./poller.js";
 import { pruneWorkspaces } from "./workspace.js";
 
 async function main(): Promise<void> {
+  if (migrateLegacyHome(homedir())) {
+    console.log("migrated ~/.agent-link to ~/.doucopy");
+  }
   const config = loadConfig();
   const pruned = pruneWorkspaces(config.responder.workspace_dir);
   if (pruned > 0) console.log(`pruned ${pruned} stale conversation workspace(s)`);
-  const policyPath = expandHome("~/.agent-link/policy.md");
-  const store = new ConversationStore(expandHome("~/.agent-link/conversations.json"));
+  const policyPath = expandHome("~/.doucopy/policy.md");
+  const store = new ConversationStore(expandHome("~/.doucopy/conversations.json"));
   const poller = new Poller(config, createHandler(config, store, policyPath));
 
   const controller = new AbortController();
@@ -26,7 +31,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
 
-  console.log(`agent-link responder started as peer "${config.self_peer}"`);
+  console.log(`doucopy responder started as peer "${config.self_peer}"`);
   await poller.run(controller.signal);
 }
 

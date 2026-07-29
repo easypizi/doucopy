@@ -10,13 +10,13 @@ const DEFAULT_STUB = `You are answering an agent from another account of the sam
 - 
 `;
 
-// Opens ~/.agent-link/policy.md in the user's editor. This is the single
+// Opens ~/.doucopy/policy.md in the user's editor. This is the single
 // documented editable filter for the responder: LLM instructions live at the
 // top, deterministic redaction rules live under the `## Never reveal`
 // heading (see daemon/src/policy.ts). Falls back to `nano` and finally to
 // just printing the path if no interactive terminal is available.
 export function runPolicy(home: string = homedir()): void {
-  const dir = path.join(home, ".agent-link");
+  const dir = path.join(home, ".doucopy");
   const file = path.join(dir, "policy.md");
   if (!existsSync(file)) {
     mkdirSync(dir, { recursive: true });

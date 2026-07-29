@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { isPaused, listPaused, pausePeer, pausedUntil, resumePeer } from "../src/paused.js";
 
 function tmpFile(): string {
-  return path.join(mkdtempSync(path.join(tmpdir(), "agent-link-paused-")), "paused.json");
+  return path.join(mkdtempSync(path.join(tmpdir(), "doucopy-paused-")), "paused.json");
 }
 
 describe("paused module", () => {

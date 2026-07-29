@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 
-// Everything the responder needs from ~/.agent-link/policy.md:
+// Everything the responder needs from ~/.doucopy/policy.md:
 //   - `text`: the whole file, forwarded verbatim as the policy prompt to
 //     the answering harness. If the file is missing we pass an empty string
 //     so the default builtin behaviour applies.

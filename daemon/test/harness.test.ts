@@ -33,7 +33,7 @@ function splitInvocations(log: string): string[][] {
 describe("ClaudeHarness", () => {
   it("runFirstTask writes task.md, uses --session-id, returns the generated session id", async () => {
     const harness = createHarness("claude");
-    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-claude-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-claude-"));
     const workspace = path.join(dir, "workspace");
     const logFile = path.join(dir, "args.log");
     process.env.FAKE_CLAUDE_LOG = logFile;
@@ -55,7 +55,7 @@ describe("ClaudeHarness", () => {
 
   it("runFollowupTask uses --resume and does NOT pass --session-id again", async () => {
     const harness = createHarness("claude");
-    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-claude-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-claude-"));
     const logFile = path.join(dir, "args.log");
     process.env.FAKE_CLAUDE_LOG = logFile;
     process.env.FAKE_CLAUDE_ANSWER = "followup-answer";
@@ -74,7 +74,7 @@ describe("ClaudeHarness", () => {
 
   it("surfaces a failing exit code as an error, no sessionId", async () => {
     const harness = createHarness("claude");
-    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-claude-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-claude-"));
     process.env.FAKE_CLAUDE_MODE = "fail";
     const result = await harness.runFirstTask(
       { binary: CLAUDE_FIXTURE, workspaceDir: path.join(dir, "workspace"), timeoutMs: 5000 },
@@ -87,7 +87,7 @@ describe("ClaudeHarness", () => {
 
   it("times out if the binary hangs past timeoutMs", async () => {
     const harness = createHarness("claude");
-    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-claude-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-claude-"));
     process.env.FAKE_CLAUDE_MODE = "hang";
     const start = Date.now();
     const result = await harness.runFirstTask(
@@ -102,7 +102,7 @@ describe("ClaudeHarness", () => {
 describe("CodexHarness", () => {
   it("runFirstTask uses plain `codex exec`, isolated CODEX_HOME, scrapes session id from rollout", async () => {
     const harness = createHarness("codex");
-    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-codex-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-codex-"));
     const workspace = path.join(dir, "workspace");
     const logFile = path.join(dir, "args.log");
     process.env.FAKE_CODEX_LOG = logFile;
@@ -126,7 +126,7 @@ describe("CodexHarness", () => {
 
   it("runFirstTask returns an error when no rollout gets written", async () => {
     const harness = createHarness("codex");
-    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-codex-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-codex-"));
     process.env.FAKE_CODEX_ANSWER = "answer-without-rollout";
     // Force the stub to skip its rollout-writing branch by pretending it was
     // called as a resume (which never writes rollout in the fake).
@@ -142,7 +142,7 @@ describe("CodexHarness", () => {
 
   it("runFollowupTask uses `exec resume <sid>` with the same CODEX_HOME", async () => {
     const harness = createHarness("codex");
-    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-codex-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-codex-"));
     const workspace = path.join(dir, "workspace");
     const logFile = path.join(dir, "args.log");
     process.env.FAKE_CODEX_LOG = logFile;
@@ -162,12 +162,12 @@ describe("CodexHarness", () => {
 
 describe("findLatestCodexSessionId", () => {
   it("returns null when the sessions directory is missing", () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-codex-scan-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-codex-scan-"));
     expect(findLatestCodexSessionId(dir)).toBeNull();
   });
 
   it("returns the uuid from the newest rollout across nested date folders", async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "agent-link-codex-scan-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-codex-scan-"));
     const { mkdirSync, writeFileSync, utimesSync } = await import("node:fs");
     const olderId = "11111111-1111-1111-1111-111111111111";
     const newerId = "22222222-2222-2222-2222-222222222222";

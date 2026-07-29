@@ -1,19 +1,19 @@
 ---
-name: agent-link-troubleshoot
-description: "Use when agent-link is misbehaving: a peer shows offline, ask_peer returns pending forever, check_reply returns unknown_ticket, MCP returns 401/403, or answers come back empty. Ranked diagnosis with concrete commands and log locations."
+name: doucopy-troubleshoot
+description: "Use when doucopy is misbehaving: a peer shows offline, ask_peer returns pending forever, check_reply returns unknown_ticket, MCP returns 401/403, or answers come back empty. Ranked diagnosis with concrete commands and log locations."
 ---
 
-# agent-link: troubleshooting
+# doucopy: troubleshooting
 
 ## First, gather cheap signals
 
 ```bash
-agent-link status                       # daemon state, peers, dialogs
-agent-link logs -f                      # follow both stdout and stderr
+doucopy status                          # daemon state, peers, dialogs
+doucopy logs -f                         # follow both stdout and stderr
 curl -fsS "$RELAY_URL/health"           # {"ok":true} means the relay is up
 ```
 
-`RELAY_URL` is in `~/.agent-link/config.json → relay_url`.
+`RELAY_URL` is in `~/.doucopy/config.json → relay_url`.
 
 ## Symptoms → causes
 
@@ -21,8 +21,8 @@ curl -fsS "$RELAY_URL/health"           # {"ok":true} means the relay is up
 
 A peer is online iff the relay saw its daemon long-poll `/inbox` in the last **60 seconds**.
 
-1. Daemon not running on that machine → `agent-link status`, `agent-link start`.
-2. Daemon running but crashing on start → `~/.agent-link/responder.err.log` for stack traces. Common: invalid `config.json` (thrown by `daemon/src/config.ts` with a `config: ...` message).
+1. Daemon not running on that machine → `doucopy status`, `doucopy start`.
+2. Daemon running but crashing on start → `~/.doucopy/responder.err.log` for stack traces. Common: invalid `config.json` (thrown by `daemon/src/config.ts` with a `config: ...` message).
 3. Auth error against the relay → the poller enters a 300s backoff. Look for `401` in the err log. Fix: `RELAY_SECRET` on the relay was rotated, or the peer name is in `REVOKED_PEERS`. Re-join with a fresh invite.
 4. Relay down or sleeping → `curl /health`. If it 502s or times out, check Heroku. If the app is on `eco`, upgrade to `basic`.
 5. Corporate proxy / DNS blocking outbound HTTPS → the daemon retries with exponential backoff (1s → 60s cap). Check the err log for network errors.
@@ -71,16 +71,16 @@ Read the `error` string. Common values:
 Most transient issues clear with:
 
 ```bash
-agent-link restart
+doucopy restart
 ```
 
 If the daemon won't stay up, run it in the foreground to see the failure interactively:
 
 ```bash
-agent-link stop
-node "$(npm root -g)/agent-link/daemon/dist/index.js"
+doucopy stop
+node "$(npm root -g)/doucopy/daemon/dist/index.js"
 ```
 
 ## When to escalate to code changes
 
-If a real bug: use `agent-link-dev`. Regression tests live under `daemon/test/` and `relay/test/`.
+If a real bug: use `doucopy-dev`. Regression tests live under `daemon/test/` and `relay/test/`.

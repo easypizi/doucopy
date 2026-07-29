@@ -1,9 +1,9 @@
 ---
-name: agent-link-relay
-description: "Use when deploying or operating the agent-link relay: initial deploy on Heroku or via Docker, rotating the shared RELAY_SECRET, revoking peers, generating bootstrap invites, checking config, tailing relay logs, choosing a dyno tier. Covers stateless HMAC auth and the relay's in-memory storage."
+name: doucopy-relay
+description: "Use when deploying or operating the doucopy relay: initial deploy on Heroku or via Docker, rotating the shared RELAY_SECRET, revoking peers, generating bootstrap invites, checking config, tailing relay logs, choosing a dyno tier. Covers stateless HMAC auth and the relay's in-memory storage."
 ---
 
-# agent-link: relay operations (v2)
+# doucopy: relay operations (v2)
 
 The relay is a small Fastify server (`relay/`) with an MCP streamable endpoint and a mailbox REST API. It stores nothing on disk. Authentication is stateless: a single `RELAY_SECRET` signs every peer token and every invite via HMAC. Restarts drop queued questions, waiters, and unresolved tickets but keep every peer's existing token valid.
 
@@ -15,7 +15,7 @@ heroku config:set RELAY_SECRET=$(node -e "console.log(require('crypto').randomBy
 git push heroku HEAD:main
 ```
 
-Or click Deploy to Heroku on the README (uses `app.json`). Or run in Docker with `docker build -t agent-link-relay . && docker run -e RELAY_SECRET=… -p 3000:3000 agent-link-relay`.
+Or click Deploy to Heroku on the README (uses `app.json`). Or run in Docker with `docker build -t doucopy-relay . && docker run -e RELAY_SECRET=… -p 3000:3000 doucopy-relay`.
 
 Subsequent deploys: `git push heroku HEAD:main`.
 
@@ -25,14 +25,14 @@ The first machine has no peer token yet, so it cannot call `POST /invite`. Inste
 
 ```bash
 heroku config:get RELAY_SECRET -a <app-name>
-# copy the value, then on any machine with agent-link installed:
-npx agent-link invite --secret <RELAY_SECRET> --ttl 24
+# copy the value, then on any machine with doucopy installed:
+npx doucopy invite --secret <RELAY_SECRET> --ttl 24
 ```
 
 After the first peer is online it can create invites for the rest without touching the secret:
 
 ```bash
-agent-link invite --ttl 24
+doucopy invite --ttl 24
 ```
 
 ## Revoke or rotate

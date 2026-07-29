@@ -22,7 +22,7 @@ export async function runStatus(): Promise<void> {
   const { loadConfig } = await import("../../daemon/dist/config.js");
   const { listPaused } = await import("../../daemon/dist/paused.js");
   const config = loadConfig();
-  console.log(c.bold("agent-link status"));
+  console.log(c.bold("doucopy status"));
   console.log(`  relay:  ${config.relay_url}`);
   console.log(`  self:   ${config.self_peer}`);
   console.log(`  daemon: ${isDaemonRunning() ? c.green("running") : c.dim("stopped")}`);

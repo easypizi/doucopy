@@ -8,7 +8,7 @@ export interface PausedEntry {
 }
 
 export function pausedPath(home: string = homedir()): string {
-  return process.env.AGENT_LINK_PAUSED_FILE ?? path.join(home, ".agent-link", "paused.json");
+  return process.env.DOUCOPY_PAUSED_FILE ?? path.join(home, ".doucopy", "paused.json");
 }
 
 function readMap(file: string): Record<string, number | null> {
@@ -34,7 +34,7 @@ function writeMap(file: string, map: Record<string, number | null>): void {
 }
 
 // Reads never mutate the file. The daemon's poller calls isPaused on every
-// incoming question, potentially concurrently with a `agent-link pause`
+// incoming question, potentially concurrently with a `doucopy pause`
 // command, and a read-modify-write from the reader side is a classic race that
 // can lose a freshly-written pause entry. Expiry cleanup is the writers' job.
 export function isPaused(peer: string, file: string = pausedPath(), now: number = Date.now()): boolean {

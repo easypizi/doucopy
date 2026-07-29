@@ -102,7 +102,7 @@ interface ExistingConnection {
 }
 
 export function readExistingConnection(home: string): ExistingConnection | null {
-  const file = path.join(home, ".agent-link/config.json");
+  const file = path.join(home, ".doucopy/config.json");
   if (!existsSync(file)) return null;
   try {
     const raw = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
@@ -129,7 +129,7 @@ interface JoinDraft {
 const DRAFT_TTL_MS = 48 * 60 * 60 * 1000;
 
 function draftPath(home: string): string {
-  return path.join(home, ".agent-link/join-draft.json");
+  return path.join(home, ".doucopy/join-draft.json");
 }
 
 export function readDraft(home: string, now: number = Date.now()): { relayUrl: string; invite: string } | null {
@@ -259,7 +259,7 @@ async function askSkillsInstall(flag: boolean | undefined, clients: Client[], ho
   }
   if (!interactive) return true;
   return confirm({
-    message: `Install (or update) agent-link skills globally into ${skillClients.map((c) => `~/.${c}/skills`).join(" and ")}?`,
+    message: `Install (or update) doucopy skills globally into ${skillClients.map((c) => `~/.${c}/skills`).join(" and ")}?`,
     default: true,
   });
 }
@@ -355,7 +355,7 @@ export async function runJoin(argv: string[]): Promise<void> {
   }
   const configPath = writeConfig(home, base);
   console.log(`wrote ${configPath}`);
-  if (writeDefaultPolicy(home, neverReveal)) console.log("wrote default ~/.agent-link/policy.md");
+  if (writeDefaultPolicy(home, neverReveal)) console.log("wrote default ~/.doucopy/policy.md");
 
   if (askers.includes("cursor")) console.log(`updated ${mergeMcpJson(home, relayUrl, token)}`);
   if (askers.includes("claude")) console.log(`updated ${mergeClaudeMcp(home, relayUrl, token)}`);
@@ -380,8 +380,8 @@ export async function runJoin(argv: string[]): Promise<void> {
   if (askerOnly) {
     clearDraft(home);
     console.log("asker-only mode: responder daemon not installed");
-    console.log("restart your coding agent (Cursor / Claude Code / Codex) so it picks up the agent-link MCP server");
-    console.log(`run "agent-link chat" to start asking peers`);
+    console.log("restart your coding agent (Cursor / Claude Code / Codex) so it picks up the doucopy MCP server");
+    console.log(`run "doucopy chat" to start asking peers`);
     return;
   }
 
@@ -395,14 +395,14 @@ export async function runJoin(argv: string[]): Promise<void> {
       if (status.self_online) {
         clearDraft(home);
         console.log("daemon is online, setup complete");
-        console.log("restart your coding agent (Cursor / Claude Code / Codex) so it picks up the agent-link MCP server");
-        console.log(`run "agent-link chat" to open the terminal REPL, or "agent-link policy" to edit the filter`);
+        console.log("restart your coding agent (Cursor / Claude Code / Codex) so it picks up the doucopy MCP server");
+        console.log(`run "doucopy chat" to open the terminal REPL, or "doucopy policy" to edit the filter`);
         return;
       }
     } catch {
       // relay may briefly reject while the daemon warms up, keep waiting
     }
   }
-  console.error("daemon did not come online within 30s, check: agent-link logs");
+  console.error("daemon did not come online within 30s, check: doucopy logs");
   process.exitCode = 1;
 }

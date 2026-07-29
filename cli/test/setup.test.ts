@@ -10,13 +10,13 @@ import {
   mergeClaudeMcp,
   mergeCodexToml,
   mergeMcpJson,
-  replaceCodexAgentLinkSection,
+  replaceDoucopyMcpSection,
   writeConfig,
   writeDefaultPolicy,
 } from "../src/setup.js";
 
 function makeHome(): string {
-  return mkdtempSync(path.join(tmpdir(), "agent-link-home-"));
+  return mkdtempSync(path.join(tmpdir(), "doucopy-home-"));
 }
 
 describe("discoverMemorySources", () => {
@@ -37,12 +37,12 @@ describe("discoverMemorySources", () => {
 });
 
 describe("writeConfig", () => {
-  it("writes 0600 config json under ~/.agent-link", () => {
+  it("writes 0600 config json under ~/.doucopy", () => {
     const home = makeHome();
     const file = writeConfig(home, defaultConfig("https://r.example.com", "mbp", "tok", {
       agents_md_roots: [], extra_files: [],
     }));
-    expect(file).toBe(path.join(home, ".agent-link/config.json"));
+    expect(file).toBe(path.join(home, ".doucopy/config.json"));
     const parsed = JSON.parse(readFileSync(file, "utf8")) as { self_peer: string; responder: { max_concurrent: number } };
     expect(parsed.self_peer).toBe("mbp");
     expect(parsed.responder.max_concurrent).toBe(3);
@@ -54,7 +54,7 @@ describe("writeDefaultPolicy", () => {
   it("creates policy.md once and never overwrites", () => {
     const home = makeHome();
     expect(writeDefaultPolicy(home)).toBe(true);
-    const file = path.join(home, ".agent-link/policy.md");
+    const file = path.join(home, ".doucopy/policy.md");
     writeFileSync(file, "customized");
     expect(writeDefaultPolicy(home)).toBe(false);
     expect(readFileSync(file, "utf8")).toBe("customized");
@@ -72,7 +72,7 @@ describe("mergeMcpJson", () => {
       mcpServers: Record<string, { url: string; headers: Record<string, string> }>;
     };
     expect(parsed.mcpServers.other.url).toBe("http://x");
-    expect(parsed.mcpServers["agent-link"]).toEqual({
+    expect(parsed.mcpServers["doucopy"]).toEqual({
       type: "http",
       url: "https://r.example.com/mcp",
       headers: { Authorization: "Bearer tok" },
@@ -83,19 +83,32 @@ describe("mergeMcpJson", () => {
   it("creates mcp.json when missing", () => {
     const home = makeHome();
     const file = mergeMcpJson(home, "https://r.example.com", "tok");
-    expect(JSON.parse(readFileSync(file, "utf8"))).toHaveProperty("mcpServers.agent-link");
+    expect(JSON.parse(readFileSync(file, "utf8"))).toHaveProperty("mcpServers.doucopy");
+  });
+
+  it("drops the legacy agent-link key on upgrade", () => {
+    const home = makeHome();
+    mkdirSync(path.join(home, ".cursor"), { recursive: true });
+    const file = path.join(home, ".cursor/mcp.json");
+    writeFileSync(file, JSON.stringify({
+      mcpServers: { "agent-link": { type: "http", url: "http://old/mcp" } },
+    }));
+    mergeMcpJson(home, "https://r.example.com", "tok");
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as { mcpServers: Record<string, unknown> };
+    expect(parsed.mcpServers["agent-link"]).toBeUndefined();
+    expect(parsed.mcpServers["doucopy"]).toBeDefined();
   });
 });
 
 describe("mergeClaudeMcp", () => {
-  it("writes ~/.claude.json with the agent-link entry", () => {
+  it("writes ~/.claude.json with the doucopy entry", () => {
     const home = makeHome();
     const file = mergeClaudeMcp(home, "https://r.example.com", "tok-c");
     expect(file).toBe(path.join(home, ".claude.json"));
     const parsed = JSON.parse(readFileSync(file, "utf8")) as {
       mcpServers: Record<string, { type: string; url: string; headers: Record<string, string> }>;
     };
-    expect(parsed.mcpServers["agent-link"]).toEqual({
+    expect(parsed.mcpServers["doucopy"]).toEqual({
       type: "http",
       url: "https://r.example.com/mcp",
       headers: { Authorization: "Bearer tok-c" },
@@ -125,18 +138,18 @@ describe("mergeClaudeMcp", () => {
 });
 
 describe("mergeCodexToml", () => {
-  it("writes a fresh ~/.codex/config.toml with the agent-link section", () => {
+  it("writes a fresh ~/.codex/config.toml with the doucopy section", () => {
     const home = makeHome();
     const file = mergeCodexToml(home, "https://r.example.com", "tok-x");
     expect(file).toBe(path.join(home, ".codex/config.toml"));
     const contents = readFileSync(file, "utf8");
-    expect(contents).toContain("[mcp_servers.agent-link]");
+    expect(contents).toContain("[mcp_servers.doucopy]");
     expect(contents).toContain('url = "https://r.example.com/mcp"');
     expect(contents).toContain('bearer_token = "tok-x"');
     expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 
-  it("keeps unrelated sections and replaces an existing agent-link block", () => {
+  it("keeps unrelated sections and replaces an existing doucopy block", () => {
     const home = makeHome();
     mkdirSync(path.join(home, ".codex"), { recursive: true });
     const file = path.join(home, ".codex/config.toml");
@@ -145,7 +158,7 @@ describe("mergeCodexToml", () => {
       [
         "approval_policy = \"on-request\"",
         "",
-        "[mcp_servers.agent-link]",
+        "[mcp_servers.doucopy]",
         "url = \"https://old.example.com/mcp\"",
         "bearer_token = \"old\"",
         "",
@@ -163,6 +176,30 @@ describe("mergeCodexToml", () => {
     expect(contents).not.toContain('bearer_token = "old"');
     expect(contents).toContain("[mcp_servers.other]");
     expect(readFileSync(`${file}.bak`, "utf8")).toContain("old.example.com");
+  });
+
+  it("drops a legacy [mcp_servers.agent-link] block on upgrade", () => {
+    const home = makeHome();
+    mkdirSync(path.join(home, ".codex"), { recursive: true });
+    const file = path.join(home, ".codex/config.toml");
+    writeFileSync(
+      file,
+      [
+        "[mcp_servers.agent-link]",
+        "url = \"https://old.example.com/mcp\"",
+        "bearer_token = \"old\"",
+        "",
+        "[mcp_servers.other]",
+        "command = \"x\"",
+        "",
+      ].join("\n"),
+    );
+    mergeCodexToml(home, "https://new.example.com", "new-tok");
+    const contents = readFileSync(file, "utf8");
+    expect(contents).not.toContain("[mcp_servers.agent-link]");
+    expect(contents).toContain("[mcp_servers.doucopy]");
+    expect(contents).toContain('url = "https://new.example.com/mcp"');
+    expect(contents).toContain("[mcp_servers.other]");
   });
 });
 
@@ -197,10 +234,10 @@ describe("detectHarnesses / detectAskers", () => {
   });
 });
 
-describe("replaceCodexAgentLinkSection", () => {
+describe("replaceDoucopyMcpSection", () => {
   it("keeps sibling sections whose bodies contain arrays with '['", () => {
     const input = [
-      "[mcp_servers.agent-link]",
+      "[mcp_servers.doucopy]",
       'url = "https://old/mcp"',
       'bearer_token = "old"',
       "",
@@ -209,8 +246,8 @@ describe("replaceCodexAgentLinkSection", () => {
       'command = "x"',
       "",
     ].join("\n");
-    const result = replaceCodexAgentLinkSection(input, [
-      "[mcp_servers.agent-link]",
+    const result = replaceDoucopyMcpSection(input, [
+      "[mcp_servers.doucopy]",
       'url = "https://new/mcp"',
       'bearer_token = "new"',
     ]);
@@ -222,12 +259,12 @@ describe("replaceCodexAgentLinkSection", () => {
     expect(result).toContain('command = "x"');
   });
 
-  it("does not swallow the following section even when the agent-link body itself contains an array", () => {
+  it("does not swallow the following section even when the doucopy body itself contains an array", () => {
     // Regression: the old regex used [^\[]* which stopped at the first "[",
     // so an array inside the section would prematurely end the match. The
     // opposite (over-matching) is tested here.
     const input = [
-      "[mcp_servers.agent-link]",
+      "[mcp_servers.doucopy]",
       'url = "https://old/mcp"',
       'bearer_token = "old"',
       'enabled_tools = ["x"]',
@@ -236,8 +273,8 @@ describe("replaceCodexAgentLinkSection", () => {
       'command = "y"',
       "",
     ].join("\n");
-    const result = replaceCodexAgentLinkSection(input, [
-      "[mcp_servers.agent-link]",
+    const result = replaceDoucopyMcpSection(input, [
+      "[mcp_servers.doucopy]",
       'url = "https://new/mcp"',
       'bearer_token = "new"',
     ]);
@@ -248,12 +285,32 @@ describe("replaceCodexAgentLinkSection", () => {
 
   it("appends the section to a file that does not have it", () => {
     const input = "approval_policy = \"on-request\"\n";
-    const result = replaceCodexAgentLinkSection(input, [
-      "[mcp_servers.agent-link]",
+    const result = replaceDoucopyMcpSection(input, [
+      "[mcp_servers.doucopy]",
       'url = "https://r/mcp"',
       'bearer_token = "t"',
     ]);
     expect(result).toContain('approval_policy = "on-request"');
-    expect(result).toContain("[mcp_servers.agent-link]");
+    expect(result).toContain("[mcp_servers.doucopy]");
+  });
+
+  it("removes a section entirely when blockLines is null", () => {
+    const input = [
+      "[mcp_servers.agent-link]",
+      'url = "https://old/mcp"',
+      "",
+      "[mcp_servers.other]",
+      'command = "x"',
+      "",
+    ].join("\n");
+    const result = replaceDoucopyMcpSection(input, null, "[mcp_servers.agent-link]");
+    expect(result).not.toContain("[mcp_servers.agent-link]");
+    expect(result).toContain("[mcp_servers.other]");
+  });
+
+  it("is a no-op when removing an absent section", () => {
+    const input = "approval_policy = \"on-request\"\n";
+    const result = replaceDoucopyMcpSection(input, null, "[mcp_servers.agent-link]");
+    expect(result).toBe(input);
   });
 });
