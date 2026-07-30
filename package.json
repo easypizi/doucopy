@@ -2,18 +2,18 @@
   "name": "doucopy",
   "version": "2.2.0",
   "description": "Connect AI agents from different accounts (or a small trusted circle) so one can ask the other questions answered from its own memory. CLI, MCP, terminal REPL.",
-  "license": "MIT",
+  "license": "FSL-1.1-MIT",
   "type": "module",
   "engines": {
     "node": "22.x"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/easypizi/pshpsh.git"
+    "url": "git+https://github.com/easypizi/doucopy.git"
   },
-  "homepage": "https://github.com/easypizi/pshpsh#readme",
+  "homepage": "https://github.com/easypizi/doucopy#readme",
   "bugs": {
-    "url": "https://github.com/easypizi/pshpsh/issues"
+    "url": "https://github.com/easypizi/doucopy/issues"
   },
   "keywords": [
     "mcp",
