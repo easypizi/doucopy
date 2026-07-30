@@ -25,10 +25,11 @@ daemon/               responder daemon
     handler.ts        per-question orchestration, per-conversation workspace
     workspace.ts      safeDirName, pruneWorkspaces
     runner.ts         spawn cursor-agent (create-chat then --resume)
-    prompt.ts         buildFirstTask, buildFollowupTask
+    prompt.ts         buildFirstTask, buildFollowupTask (+ persona / restrictions preamble)
+    permissions.ts    buildPermissions + per-harness materialization
     conversations.ts  conversation_id → chatId map
     redact.ts         built-in patterns + user rules
-    config.ts         config.json validation (incl. max_concurrent)
+    config.ts         config.json validation (incl. max_concurrent, restrictions, persona)
     migrate.ts        one-time ~/.agent-link → ~/.doucopy home migration
   test/               vitest
   launchd/            com.doucopy.responder.plist
@@ -38,6 +39,7 @@ cli/                  doucopy CLI (bin aliases: doucopy, agent-link)
     index.ts          argv dispatcher
     api.ts            HTTP client for /join, /invite, /status
     setup.ts          discoverMemorySources, writeConfig, mergeMcpJson, writeDefaultPolicy
+    settings.ts       doucopy settings wizard (restrictions, model, persona, harness)
     join.ts           end-to-end machine setup
     invite.ts         invite (server-side or --secret bootstrap)
     status.ts         daemon + relay status
@@ -63,6 +65,7 @@ docs/superpowers/     specs, plans
 8. **Tokens are stateless HMAC.** Never introduce a database of peers on the relay. Revocation goes through `REVOKED_PEERS` or a `RELAY_SECRET` rotation.
 9. **Per-conversation workspaces** are created via `safeDirName(conversation_id)`. Never write to the workspace root directly, parallel `cursor-agent` runs would clobber each other's `task.md`.
 10. **Legacy home migration is a one-way rename.** `migrateLegacyHome` moves `~/.agent-link` to `~/.doucopy` only when the new path doesn't exist yet. Do not make it copy or merge, a bare `renameSync` is the whole contract.
+11. **`buildPermissions` invariants** (`daemon/src/permissions.ts`): deny wins over allow in Cursor and Claude rule evaluation. Built-in read denials (`~/.ssh`, `~/.aws`, `~/.doucopy`) are always present and cannot be cleared by config. Missing `restrictions` means workspace-only writes and shell off. Do not put a blanket `Write(**)` deny under Cursor `--force`, it would also block the workspace because deny wins. Codex only gets a coarse `--sandbox` mapping.
 
 ## Test map
 
@@ -75,17 +78,20 @@ docs/superpowers/     specs, plans
 | `relay/test/mcp.test.ts` | list_peers, ask_peer (offline/never-seen/self), check_reply, keepalive |
 | `relay/test/rest.test.ts` | /health, /inbox, /answer, /join (+ rate limit), /invite, /status |
 | `relay/test/index.test.ts` | /mcp 405 for GET/DELETE |
-| `daemon/test/config.test.ts` | loadConfig validation, max_concurrent, redact rules |
+| `daemon/test/config.test.ts` | loadConfig validation, max_concurrent, redact, restrictions, persona |
 | `daemon/test/conversations.test.ts` | store, 7-day prune, corruption recovery |
-| `daemon/test/handler.test.ts` | per-conversation workspace, redaction, resume |
+| `daemon/test/handler.test.ts` | per-conversation workspace, redaction, resume, cli.json materialization |
 | `daemon/test/integration.test.ts` | real relay + daemon + fake cursor-agent |
+| `daemon/test/permissions.test.ts` | buildPermissions defaults, allow/deny, three harness formats |
+| `daemon/test/restrictions-integration.test.ts` | Desktop lockdown, custom allow, read blocklist, shell-off memory reads |
 | `daemon/test/poller.test.ts` | poll loop, backoff, parallel dispatch, drain |
-| `daemon/test/prompt.test.ts` | first/followup task content |
+| `daemon/test/prompt.test.ts` | first/followup task content, persona, restrictions preamble |
 | `daemon/test/redact.test.ts` | literals, patterns, built-ins |
 | `daemon/test/runner.test.ts` | createChat, runTask, timeout |
 | `daemon/test/workspace.test.ts` | safeDirName, pruneWorkspaces |
 | `cli/test/api.test.ts` | HTTP client wrappers |
 | `cli/test/setup.test.ts` | memory discovery, config, policy, mcp.json merge |
+| `cli/test/settings.test.ts` | settings helpers round-trip |
 | `cli/test/join-resume.test.ts` | existing connection reuse, join-draft persistence |
 
 Integration uses `daemon/test/fixtures/fake-cursor-agent.sh`. Keep it fast and deterministic.

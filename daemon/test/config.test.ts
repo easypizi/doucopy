@@ -98,4 +98,51 @@ describe("loadConfig", () => {
     writeFileSync(file, JSON.stringify({ ...VALID, redact: { patterns: ["[unclosed"] } }));
     expect(() => loadConfig(file)).toThrow(/invalid redact pattern/);
   });
+
+  it("accepts a restrictions section and expands allow/deny paths", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-"));
+    const file = path.join(dir, "config.json");
+    writeFileSync(
+      file,
+      JSON.stringify({
+        ...VALID,
+        restrictions: {
+          fs_write: { mode: "custom", allow: ["~/Desktop"] },
+          fs_read: { deny: ["~/Documents/finance"] },
+          shell: { mode: "deny_patterns", deny: ["rm"] },
+        },
+        responder: { ...VALID.responder, persona: "brief" },
+      }),
+    );
+    const config = loadConfig(file);
+    expect(config.restrictions?.fs_write?.mode).toBe("custom");
+    expect(config.restrictions?.fs_write?.allow).toEqual([path.join(homedir(), "Desktop")]);
+    expect(config.restrictions?.fs_read?.deny).toEqual([path.join(homedir(), "Documents/finance")]);
+    expect(config.restrictions?.shell?.mode).toBe("deny_patterns");
+    expect(config.responder.persona).toBe("brief");
+  });
+
+  it("allows missing restrictions (safe default applied at runtime)", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-"));
+    const file = path.join(dir, "config.json");
+    writeFileSync(file, JSON.stringify(VALID));
+    expect(loadConfig(file).restrictions).toBeUndefined();
+  });
+
+  it("rejects invalid restrictions.fs_write.mode", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-"));
+    const file = path.join(dir, "config.json");
+    writeFileSync(
+      file,
+      JSON.stringify({ ...VALID, restrictions: { fs_write: { mode: "anywhere" } } }),
+    );
+    expect(() => loadConfig(file)).toThrow(/fs_write\.mode/);
+  });
+
+  it("rejects non-string responder.persona", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-"));
+    const file = path.join(dir, "config.json");
+    writeFileSync(file, JSON.stringify({ ...VALID, responder: { ...VALID.responder, persona: 1 } }));
+    expect(() => loadConfig(file)).toThrow(/persona/);
+  });
 });

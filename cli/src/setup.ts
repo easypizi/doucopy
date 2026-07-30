@@ -83,6 +83,11 @@ export function defaultConfig(
       max_concurrent: 3,
       model: "composer-2.5",
     },
+    restrictions: {
+      fs_write: { mode: "workspace_only", allow: [] },
+      fs_read: { deny: [] },
+      shell: { mode: "off", deny: [] },
+    },
     redact: { literals: [], patterns: [] },
   };
 }

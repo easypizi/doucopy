@@ -49,8 +49,31 @@ describe("ClaudeHarness", () => {
     expect(firstInvocation).toContain("--session-id");
     expect(firstInvocation).toContain(result.sessionId as string);
     expect(firstInvocation).not.toContain("--resume");
+    expect(firstInvocation).toContain("--permission-mode");
+    expect(firstInvocation).toContain("dontAsk");
     expect(firstInvocation).toContain("--model");
     expect(firstInvocation).toContain("sonnet-x");
+  });
+
+  it("passes --settings JSON when claudeSettingsJson is set", async () => {
+    const harness = createHarness("claude");
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-claude-"));
+    const logFile = path.join(dir, "args.log");
+    process.env.FAKE_CLAUDE_LOG = logFile;
+    process.env.FAKE_CLAUDE_ANSWER = "ok";
+    const settings = JSON.stringify({ permissions: { allow: ["Read"], deny: ["Bash"] } });
+    await harness.runFirstTask(
+      {
+        binary: CLAUDE_FIXTURE,
+        workspaceDir: path.join(dir, "workspace"),
+        timeoutMs: 5000,
+        claudeSettingsJson: settings,
+      },
+      "T",
+    );
+    const [invocation] = splitInvocations(readFileSync(logFile, "utf8"));
+    expect(invocation).toContain("--settings");
+    expect(invocation).toContain(settings);
   });
 
   it("runFollowupTask uses --resume and does NOT pass --session-id again", async () => {
@@ -157,6 +180,23 @@ describe("CodexHarness", () => {
     const [invocation] = splitInvocations(log);
     expect(invocation.slice(0, 3)).toEqual(["exec", "resume", "sid-42"]);
     expect(log).toContain(`CODEX_HOME=${path.join(workspace, ".codex-home")}`);
+  });
+
+  it("honours codexSandbox override", async () => {
+    const harness = createHarness("codex");
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-codex-"));
+    const workspace = path.join(dir, "workspace");
+    const logFile = path.join(dir, "args.log");
+    process.env.FAKE_CODEX_LOG = logFile;
+    process.env.FAKE_CODEX_ANSWER = "x";
+    process.env.FAKE_CODEX_SESSION_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    await harness.runFirstTask(
+      { binary: CODEX_FIXTURE, workspaceDir: workspace, timeoutMs: 5000, codexSandbox: "danger-full-access" },
+      "T",
+    );
+    const [invocation] = splitInvocations(readFileSync(logFile, "utf8"));
+    expect(invocation).toContain("danger-full-access");
+    expect(invocation).not.toContain("workspace-write");
   });
 });
 

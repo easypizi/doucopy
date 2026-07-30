@@ -226,4 +226,56 @@ describe("createHandler", () => {
     const result = await handler(question());
     expect(result.answer).toBe("I worked on [redacted] with key [redacted] last quarter.");
   });
+
+  it("writes .cursor/cli.json with shell-off deny and describes restrictions in the task", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-handler-"));
+    process.env.FAKE_AGENT_MODE = "ok";
+    const config = makeConfig(dir);
+    config.responder.persona = "concise";
+    const store = new ConversationStore(path.join(dir, "conversations.json"));
+    const handler = createHandler(config, store, "test policy");
+    await handler(question());
+    const cliJsonPath = path.join(config.responder.workspace_dir, "conv-1", ".cursor", "cli.json");
+    expect(existsSync(cliJsonPath)).toBe(true);
+    const cli = JSON.parse(readFileSync(cliJsonPath, "utf8")) as {
+      permissions: { allow: string[]; deny: string[] };
+    };
+    expect(cli.permissions.deny).toContain("Shell(*)");
+    expect(cli.permissions.deny.some((d) => d.includes("Desktop"))).toBe(true);
+    const taskMd = readFileSync(
+      path.join(config.responder.workspace_dir, "conv-1", "task.md"),
+      "utf8",
+    );
+    expect(taskMd).toContain("Active tool restrictions");
+    expect(taskMd).toContain("Shell commands are disabled");
+    expect(taskMd).toContain("concise");
+  });
+
+  it("passes claude settings and codex sandbox from restrictions via injected harness opts", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-handler-"));
+    const seen: HarnessOptions[] = [];
+    const fake: Harness = {
+      kind: "claude",
+      async runFirstTask(opts): Promise<HarnessResult> {
+        seen.push(opts);
+        return { answer: "ok", sessionId: "s1" };
+      },
+      async runFollowupTask(): Promise<HarnessResult> {
+        throw new Error("unused");
+      },
+    };
+    const config = makeConfig(dir);
+    config.responder.harness = "claude";
+    config.responder.binary = "claude";
+    delete config.responder.cursor_agent_binary;
+    config.restrictions = { shell: { mode: "off" } };
+    const store = new ConversationStore(path.join(dir, "conversations.json"));
+    const handler = createHandler(config, store, "test policy", fake);
+    await handler(question());
+    expect(seen[0].claudeSettingsJson).toBeTruthy();
+    const settings = JSON.parse(seen[0].claudeSettingsJson as string) as {
+      permissions: { deny: string[] };
+    };
+    expect(settings.permissions.deny).toContain("Bash");
+  });
 });

@@ -14,7 +14,7 @@ FOLLOW ?=
 CLI := node cli/dist/index.js
 
 .PHONY: help install build typecheck test test-watch clean relay \
-        join setup policy invite chat status logs start stop restart pause resume \
+        join setup policy settings invite chat status logs start stop restart pause resume \
         deploy rotate-secret revoke unrevoke invite-bootstrap health publish
 
 ## User-facing (##U) and maintainer (##M) markers keep two sections tidy.
@@ -43,6 +43,9 @@ status: build ##U Show daemon, peers, dialogs and paused peers
 
 policy: build ##U Edit ~/.doucopy/policy.md (LLM rules + Never reveal filter)
 	$(CLI) policy
+
+settings: build ##U Edit restrictions, model, persona and harness
+	$(CLI) settings
 
 logs: build ##U Show responder logs. FOLLOW=1 to stream
 	@if [ -n "$(FOLLOW)" ]; then $(CLI) logs -f; else $(CLI) logs; fi

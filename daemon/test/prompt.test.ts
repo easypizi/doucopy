@@ -9,6 +9,15 @@ const MEMORY = {
 
 const CTX: QuestionContext = { fromPeer: "personal", conversationId: "conv-1", hops: 0 };
 const CTX_HOP1: QuestionContext = { ...CTX, hops: 1 };
+const SAFE_OPTS = {
+  restrictions: {
+    fs_write: { mode: "workspace_only" as const, allow: [] as string[] },
+    fs_read: { deny: [] as string[] },
+    shell: { mode: "off" as const, deny: [] as string[] },
+  },
+  writeRoots: ["/home/u/.doucopy/workspace/conv-1"],
+  persona: "brief friendly tone",
+};
 
 describe("buildFirstTask", () => {
   it("includes policy, question and memory sources", () => {
@@ -61,6 +70,15 @@ describe("buildFirstTask", () => {
     const task = buildFirstTask("Do not share secrets.", "q", MEMORY, CTX_HOP1);
     expect(task).toContain("Do NOT call ask_peer");
   });
+
+  it("describes active restrictions and persona instead of a bare no-modify line", () => {
+    const task = buildFirstTask("Do not share secrets.", "What did I ship?", MEMORY, CTX, SAFE_OPTS);
+    expect(task).toContain("Active tool restrictions");
+    expect(task).toContain("Shell commands are disabled");
+    expect(task).toContain("/home/u/.doucopy/workspace/conv-1");
+    expect(task).toContain("brief friendly tone");
+    expect(task).not.toContain("Do not modify files, do not run destructive commands.");
+  });
 });
 
 describe("buildFollowupTask", () => {
@@ -98,5 +116,11 @@ describe("buildFollowupTask", () => {
   it("forbids counter-questions on follow-ups when hops>=1", () => {
     const task = buildFollowupTask("Do not share secrets.", "q", CTX_HOP1);
     expect(task).toContain("Do NOT call ask_peer");
+  });
+
+  it("repeats restriction summary and persona on follow-ups", () => {
+    const task = buildFollowupTask("Do not share secrets.", "Anything else?", CTX, SAFE_OPTS);
+    expect(task).toContain("Active tool restrictions");
+    expect(task).toContain("brief friendly tone");
   });
 });

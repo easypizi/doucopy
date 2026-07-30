@@ -2,12 +2,17 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { v7 as uuidv7 } from "uuid";
+import type { CodexSandbox } from "./permissions.js";
 import { createChat as cursorCreateChat, runTask as cursorRunTask, type RunnerOptions } from "./runner.js";
 
 export type HarnessKind = "cursor-agent" | "claude" | "codex";
 
 export interface HarnessOptions extends RunnerOptions {
   extraArgs?: string[];
+  /** Inline Claude Code settings JSON (permissions). Passed as --settings. */
+  claudeSettingsJson?: string;
+  /** Codex --sandbox mode derived from restrictions. Defaults to workspace-write. */
+  codexSandbox?: CodexSandbox;
 }
 
 export interface HarnessResult {
@@ -127,20 +132,25 @@ class CursorHarness implements Harness {
 // --resume, so we branch first vs follow-up here.
 class ClaudeHarness implements Harness {
   readonly kind: HarnessKind = "claude";
-  async runFirstTask(opts: HarnessOptions, task: string): Promise<HarnessResult> {
-    const sessionId = uuidv7();
-    writeTaskFile(opts.workspaceDir, task);
-    const args = [
+  private claudeArgs(opts: HarnessOptions, sessionFlags: string[]): string[] {
+    return [
       "-p",
       "Read the file task.md in this workspace and follow the instructions in it.",
       "--output-format", "text",
-      "--session-id", sessionId,
+      "--permission-mode", "dontAsk",
+      ...sessionFlags,
+      ...(opts.claudeSettingsJson ? ["--settings", opts.claudeSettingsJson] : []),
       ...(opts.model ? ["--model", opts.model] : []),
       ...(opts.extraArgs ?? []),
     ];
+  }
+
+  async runFirstTask(opts: HarnessOptions, task: string): Promise<HarnessResult> {
+    const sessionId = uuidv7();
+    writeTaskFile(opts.workspaceDir, task);
     const result = await spawnAndCapture({
       cmd: opts.binary,
-      args,
+      args: this.claudeArgs(opts, ["--session-id", sessionId]),
       cwd: opts.workspaceDir,
       timeoutMs: opts.timeoutMs,
       labelForError: "claude",
@@ -149,17 +159,9 @@ class ClaudeHarness implements Harness {
   }
   async runFollowupTask(opts: HarnessOptions, sessionId: string, task: string): Promise<HarnessResult> {
     writeTaskFile(opts.workspaceDir, task);
-    const args = [
-      "-p",
-      "Read the file task.md in this workspace and follow the instructions in it.",
-      "--output-format", "text",
-      "--resume", sessionId,
-      ...(opts.model ? ["--model", opts.model] : []),
-      ...(opts.extraArgs ?? []),
-    ];
     return spawnAndCapture({
       cmd: opts.binary,
-      args,
+      args: this.claudeArgs(opts, ["--resume", sessionId]),
       cwd: opts.workspaceDir,
       timeoutMs: opts.timeoutMs,
       labelForError: "claude",
@@ -178,6 +180,10 @@ class CodexHarness implements Harness {
     return path.join(workspaceDir, ".codex-home");
   }
 
+  private sandbox(opts: HarnessOptions): CodexSandbox {
+    return opts.codexSandbox ?? "workspace-write";
+  }
+
   async runFirstTask(opts: HarnessOptions, task: string): Promise<HarnessResult> {
     writeTaskFile(opts.workspaceDir, task);
     const codexHome = this.codexHome(opts.workspaceDir);
@@ -185,7 +191,7 @@ class CodexHarness implements Harness {
     const args = [
       "exec",
       "--skip-git-repo-check",
-      "--sandbox", "workspace-write",
+      "--sandbox", this.sandbox(opts),
       ...(opts.model ? ["--model", opts.model] : []),
       ...(opts.extraArgs ?? []),
       "Read the file task.md in this workspace and follow the instructions in it.",
@@ -213,7 +219,7 @@ class CodexHarness implements Harness {
     const args = [
       "exec", "resume", sessionId,
       "--skip-git-repo-check",
-      "--sandbox", "workspace-write",
+      "--sandbox", this.sandbox(opts),
       ...(opts.model ? ["--model", opts.model] : []),
       ...(opts.extraArgs ?? []),
       "Read the file task.md in this workspace and follow the instructions in it.",

@@ -12,6 +12,7 @@ import { runDeploy, runHealth, runRevoke, runSecretRotate, runUnrevoke } from ".
 import { runPause, runResume } from "./pause.js";
 import { runPolicy } from "./policy.js";
 import { runRelay } from "./relay.js";
+import { runSettings } from "./settings.js";
 import { runSetup } from "./setup-wizard.js";
 import { runStatus } from "./status.js";
 
@@ -21,6 +22,7 @@ Setup
   join [relay-url] [invite]              connect, reconfigure or resume setup
   setup                                  owner: deploy relay + first join
   invite [--ttl h] [--secret s | --app]  create an invite code
+  settings                               edit restrictions, model, persona, harness
   policy                                 edit ~/.doucopy/policy.md
 
 Daily
@@ -58,6 +60,9 @@ async function main(): Promise<void> {
     }
     case "setup":
       await runSetup(rest);
+      return;
+    case "settings":
+      await runSettings(home);
       return;
     case "policy":
       runPolicy(home);

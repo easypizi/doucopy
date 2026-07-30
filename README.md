@@ -2,6 +2,15 @@
 
 **Two AI agents. Different accounts. Same person or a small trusted circle. One can ask the other about anything already in the other's chat history, notes and code.**
 
+```
+You:  Hey Claude, ask John's agent how he implemented auth in Cursor.
+You:  (your agent calls ask_peer on its own)
+John's agent:  We use session cookies plus a refresh token in httpOnly storage. Details are in our AGENTS.md under auth/.
+You:  (the answer lands in the same chat)
+```
+
+After `join`, natural language is the primary interface. Skills installed in wizard step 4 tell your agent when to call `ask_peer`. You do not need to memorize MCP tool names for daily use.
+
 Got an invite? One command:
 
 ```bash
@@ -14,7 +23,7 @@ That's it. The wizard configures Cursor, Claude Code and Codex, installs a respo
 
 Every AI coding agent keeps its memory in a silo. Your Cursor at work doesn't know what your Claude Code at home decided yesterday. Your personal account can't see the conversations on your other account. And nobody's agent can ask a colleague's agent a question.
 
-doucopy connects them. Each machine answers questions **from its own local memory** (agent transcripts, `AGENTS.md`, notes) using its own agent CLI. Raw data never leaves the machine, only the written answer does, filtered through a local policy you control.
+doucopy connects them. Each machine answers questions **from its own local memory** (agent transcripts, `AGENTS.md`, notes) using its own agent CLI. Raw data never leaves the machine, only the written answer does, filtered through local policy and tool restrictions you control.
 
 **Use cases:**
 
@@ -26,11 +35,11 @@ doucopy connects them. Each machine answers questions **from its own local memor
 
 ```
 your coding agent (Cursor / Claude Code / Codex)
-  ├── calls the doucopy MCP server (ask_peer / list_peers / check_reply)
+  ├── understands a normal-language ask (skills call ask_peer)
   ├── relay forwards the question (stateless HMAC auth, no database)
   ├── peer's responder daemon picks it up via long-poll
   ├── daemon runs the peer's own agent CLI over its local memory
-  ├── policy.md filter strips anything marked "never reveal"
+  ├── harness permissions + policy.md + redact filter the run
   └── the answer travels back through the relay to your chat
 ```
 
@@ -52,8 +61,9 @@ The wizard asks:
 1. **Peer name** for this machine (default is your hostname, editable).
 2. **Where to authorize** as an asker: Cursor / Claude Code / Codex (multi-select, pre-checked based on what's installed).
 3. **Which harness answers questions** for other peers, or pick `asker-only` if you never want to be a responder.
-4. **Install skills globally** into `~/.cursor/skills` and `~/.claude/skills`.
+4. **Install skills globally** into `~/.cursor/skills` and `~/.claude/skills` (these teach your agent to use natural-language asks).
 5. **Never reveal**: comma-separated words the responder must strip from every outgoing answer.
+6. **Restrictions** (optional, skip = safe default): write folders, read blocklist, shell mode.
 
 Then, without asking:
 
@@ -66,7 +76,7 @@ Then, without asking:
 
 **Resuming the wizard.** Run `npx doucopy join` without arguments any time:
 
-- If this machine is already connected, the wizard offers to reuse the existing peer and token and just walks through askers / responder / skills / policy again.
+- If this machine is already connected, the wizard offers to reuse the existing peer and token and just walks through askers / responder / skills / policy / restrictions again.
 - If a previous run was interrupted after you typed the relay URL and invite, they're prefilled on the next attempt (draft stored in `~/.doucopy/join-draft.json`, TTL 48h, deleted on success).
 
 Non-interactive form for scripts:
@@ -79,10 +89,19 @@ npx doucopy join <relay-url> <invite> \
 
 ## Requirements
 
-- Node.js 22.x on every machine (relay and peers).
-- macOS for the responder daemon (uses `launchd`). Asker-only mode works on Linux too.
+### To join as a peer
+
+- Node.js 22.x on the machine.
+- An invite code from someone already in the circle.
+- macOS if this machine should run the responder daemon (`launchd`). Asker-only mode works on Linux too.
 - A local coding-agent CLI on every responder machine: `cursor-agent`, `claude` or `codex`.
-- Somebody in the circle has a Heroku (or Docker) host for the relay.
+
+If the circle already has a relay, you can stop here and run `npx doucopy join`.
+
+### To host the relay
+
+- Heroku (or Docker) capacity for one small Node service.
+- See [Hosting the relay yourself](#hosting-the-relay-yourself) for the git-clone deploy flow.
 
 ## Hosting the relay yourself
 
@@ -114,7 +133,44 @@ Local relay for testing: `make relay RELAY_SECRET=$(openssl rand -hex 32)`.
 
 ## Daily use
 
-### From your coding agent (MCP)
+### Natural language (primary)
+
+After `join`, talk to your own coding agent in a normal phrase:
+
+- "Ask my work machine what I decided about billing last week."
+- "Ask John's agent how auth works in their Cursor setup."
+
+Skills installed during join (wizard step 4) tell the agent when to call `ask_peer`. Follow-ups in the same thread reuse `conversation_id` automatically when your agent keeps the thread.
+
+### From the terminal
+
+```bash
+npx doucopy chat                      # interactive REPL: colored peers table, /use <peer>, then type
+npx doucopy status                    # daemon, peers, dialogs, paused peers, coloured status
+npx doucopy settings                  # restrictions, filtering, model, persona, harness
+npx doucopy policy                    # opens ~/.doucopy/policy.md in $EDITOR
+npx doucopy logs -f                   # tail the responder log
+npx doucopy pause work-mbp --for 2h   # refuse questions from a peer
+npx doucopy resume work-mbp
+npx doucopy start | stop | restart    # control the launchd daemon
+npx doucopy invite --ttl 48           # mint an invite from this machine
+```
+
+Every command has a `make` alias for a repo checkout: `make chat`, `make status`, `make settings`, `make policy`, `make invite`, `make pause PEER=work-mbp FOR=2h`, and so on. Run `make` for the full list.
+
+### Restrictions and filtering
+
+Three layers on every answering machine:
+
+1. **Harness permissions** (default: write only inside the responder workspace, shell off). Built-in read denials always include `~/.ssh`, `~/.aws`, `~/.doucopy`. Edit with `npx doucopy settings`.
+2. **`policy.md`** soft instructions for topics and tone.
+3. **`## Never reveal` / redact** hard post-filter on every outgoing answer.
+
+Codex only supports coarse `--sandbox` modes, so per-path write allows are approximate there.
+
+### MCP reference
+
+Raw tool shapes, useful when debugging or writing skills:
 
 ```
 list_peers
@@ -136,32 +192,8 @@ check_reply(ticket_id="…")
 |---|---|
 | `answered` | you have `answer`, done |
 | `pending` | didn't finish inside `timeout_seconds`, call `check_reply` later |
-| `peer_offline` | peer hasn't polled the relay for >60s; question is queued for 24h, use `check_reply` |
+| `peer_offline` | peer hasn't polled the relay for >60s, question is queued for 24h, use `check_reply` |
 | `error` | show the `error` field, don't retry silently |
-
-### From the terminal
-
-```bash
-npx doucopy chat                      # interactive REPL: colored peers table, /use <peer>, then type
-npx doucopy status                    # daemon, peers, dialogs, paused peers, coloured status
-npx doucopy policy                    # opens ~/.doucopy/policy.md in $EDITOR
-npx doucopy logs -f                   # tail the responder log
-npx doucopy pause work-mbp --for 2h   # refuse questions from a peer
-npx doucopy resume work-mbp
-npx doucopy start | stop | restart    # control the launchd daemon
-npx doucopy invite --ttl 48           # mint an invite from this machine
-```
-
-Every command has a `make` alias for a repo checkout: `make chat`, `make status`, `make policy`, `make invite`, `make pause PEER=work-mbp FOR=2h`, and so on. Run `make` for the full list.
-
-### The single filter: policy.md
-
-`~/.doucopy/policy.md` is the one place to control the responder:
-
-- The top of the file is the instruction prepended to every task the responder runs.
-- The `## Never reveal` section is a deterministic post-filter that runs in daemon code (outside the LLM), stripping matches from every outgoing `answer` and `error`. Bullet lines are case-insensitive literals; slash-wrapped bullets are regex (`- /internal-project-\d+/`).
-
-Edits take effect on the next question, no restart. Open the file with `npx doucopy policy`.
 
 ### Counter-questions
 
@@ -176,7 +208,7 @@ doucopy is built for a small circle of trusted machines, tens rather than thousa
 | Central database with your conversations | No database. Answers are computed on the owner's machine, raw data never uploaded |
 | User accounts, sessions, OAuth | Stateless HMAC tokens minted from one relay secret |
 | Fleet of servers | One relay instance. Ten peers is ten idle long-poll sockets |
-| Privacy policy page | `policy.md` on each machine, enforced locally in code |
+| Privacy policy page | `policy.md` and `restrictions` on each machine, enforced locally in code |
 
 ## Caveats
 
@@ -204,7 +236,7 @@ make test
 make typecheck
 ```
 
-To validate the npm tarball before publishing: `npm pack` then `npm i -g ./doucopy-*.tgz`. `npm run sync-skills` mirrors `.cursor/skills/doucopy-{ask,answer,troubleshoot}` into the `skills/` directory that ships in the tarball; it runs automatically on `prepack`.
+To validate the npm tarball before publishing: `npm pack` then `npm i -g ./doucopy-*.tgz`. `npm run sync-skills` mirrors `.cursor/skills/doucopy-{ask,answer,troubleshoot}` into the `skills/` directory that ships in the tarball. It runs automatically on `prepack`.
 
 The package ships two bin names: `doucopy` and the legacy `agent-link` alias, for anyone who installed it under the old name.
 

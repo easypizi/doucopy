@@ -1,6 +1,6 @@
 ---
 name: doucopy-setup
-description: "Use when joining a new machine to a doucopy deployment, when the ask_peer MCP tool doesn't appear in Cursor, or when a peer needs to be added to a relay. Covers doucopy join, invite generation, launchd install (com.doucopy.responder), MCP merge into ~/.cursor/mcp.json, and post-install verification."
+description: "Use when joining a new machine to a doucopy deployment, when the ask_peer MCP tool doesn't appear in Cursor, or when a peer needs to be added to a relay. Covers doucopy join, doucopy settings, invite generation, launchd install (com.doucopy.responder), MCP merge into ~/.cursor/mcp.json, and post-install verification."
 ---
 
 # doucopy: machine setup (v2)
@@ -23,7 +23,8 @@ npx doucopy join <relay-url> <invite>
 - asks which harness should answer questions (if more than one is present),
 - exchanges the invite for a peer token,
 - discovers memory sources (`~/.cursor/*.md` files, directories containing `AGENTS.md` under common dev roots),
-- writes `~/.doucopy/config.json` (with `responder.harness` set) and `~/.doucopy/policy.md`,
+- offers a restrictions step (write folders, read blocklist, shell). Skip keeps the safe default: workspace-only writes, shell off,
+- writes `~/.doucopy/config.json` (with `responder.harness` and `restrictions`) and `~/.doucopy/policy.md`,
 - merges the relay entry into every detected asker config:
   - `~/.cursor/mcp.json`,
   - `~/.claude.json`,
@@ -33,6 +34,14 @@ npx doucopy join <relay-url> <invite>
 - polls the relay `/status` endpoint until the daemon reports online.
 
 A machine that still has `~/.agent-link` from before the rename gets it moved to `~/.doucopy` automatically on the next `doucopy` command (see `migrateLegacyHome` in `doucopy-dev`).
+
+## Reconfigure later
+
+```bash
+npx doucopy settings
+```
+
+Sectioned menu: Restrictions, Filtering (`policy.md` + redact literals), Model, Persona, Harness. Writes config atomically and can restart the daemon at the end. `npx doucopy join` without arguments can also re-walk askers / responder / skills / policy / restrictions while reusing the existing peer token.
 
 ## Verify
 
@@ -53,6 +62,7 @@ rm ~/Library/LaunchAgents/com.doucopy.responder.plist
 ## Common pitfalls
 
 - Restart Cursor after `doucopy join`, MCP config is read at startup.
+- After changing restrictions or model via `doucopy settings`, accept the restart prompt (or run `doucopy restart`).
 - If `doucopy status` shows the daemon running but not connected, check `doucopy logs -f` — most often the token was invalidated by a `RELAY_SECRET` rotation or by `REVOKED_PEERS`.
 - Heroku `eco` dynos sleep and make peers look offline. Use `basic` or higher.
 - Peer names must match `[A-Za-z0-9._-]{1,64}`. The relay rejects anything else.

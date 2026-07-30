@@ -7,6 +7,14 @@ import { fetchStatus, joinRelay, normalizeRelayUrl } from "./api.js";
 import { installDaemon } from "./launchd.js";
 import { areAllSkillsInstalled, installGlobalSkills, type SkillsClient } from "./skills.js";
 import {
+  applyRestrictions,
+  promptRestrictionsStep,
+  readConfigFile,
+  restrictionsFromConfig,
+  SAFE_RESTRICTIONS,
+  type RestrictionsSettings,
+} from "./settings.js";
+import {
   defaultConfig,
   detectAskers,
   detectResponders,
@@ -340,18 +348,33 @@ export async function runJoin(argv: string[]): Promise<void> {
   const wantSkills = await askSkillsInstall(flags.skills, askers, home, interactive);
   const neverReveal = await askNeverReveal(flags.neverReveal, interactive, askerOnly);
 
+  let restrictions: RestrictionsSettings = {
+    fs_write: { mode: SAFE_RESTRICTIONS.fs_write.mode, allow: [] },
+    fs_read: { deny: [] },
+    shell: { mode: SAFE_RESTRICTIONS.shell.mode, deny: [] },
+  };
+  if (!askerOnly && interactive) {
+    const chosen = await promptRestrictionsStep(restrictionsFromConfig(readConfigFile(home)), {
+      allowSkip: true,
+      skipLabel: "Skip (safe default: workspace writes only, shell off)",
+    });
+    if (chosen !== "skip") restrictions = chosen;
+  }
+
   const discovery = discoverMemorySources(home);
   if (discovery.agents_md_roots.length > 0) {
     console.log(`memory roots: ${discovery.agents_md_roots.join(", ")}`);
   }
-  const base = defaultConfig(relayUrl, peer, token, discovery) as {
+  let base = defaultConfig(relayUrl, peer, token, discovery) as {
     responder: { harness?: HarnessKind; binary?: string; cursor_agent_binary?: string };
+    restrictions?: RestrictionsSettings;
   };
   if (!askerOnly) {
     const harness = responder as HarnessKind;
     base.responder.harness = harness;
     base.responder.binary = harness;
     if (harness !== "cursor-agent") delete base.responder.cursor_agent_binary;
+    base = applyRestrictions(base, restrictions) as typeof base;
   }
   const configPath = writeConfig(home, base);
   console.log(`wrote ${configPath}`);

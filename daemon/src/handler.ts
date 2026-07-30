@@ -4,6 +4,12 @@ import { resolveHarness, type DaemonConfig } from "./config.js";
 import type { ConversationStore } from "./conversations.js";
 import { createHarness, type Harness, type HarnessOptions } from "./harness.js";
 import { isPaused, pausedUntil } from "./paused.js";
+import {
+  buildPermissions,
+  claudeSettingsArg,
+  logRestrictionsSummary,
+  materializeCursorPermissions,
+} from "./permissions.js";
 import type { QuestionHandler } from "./poller.js";
 import { readPolicy } from "./policy.js";
 import { buildFirstTask, buildFollowupTask, type MemoryMap } from "./prompt.js";
@@ -66,12 +72,25 @@ export function createHandler(
       const suffix = typeof until === "number" ? ` until ${new Date(until).toISOString()}` : "";
       return redactResult(parsedPolicy.neverReveal, { error: `peer paused${suffix}` });
     }
+    const conversationWorkspace = path.join(
+      config.responder.workspace_dir,
+      safeDirName(question.conversation_id),
+    );
+    const perms = buildPermissions(config, conversationWorkspace);
+    logRestrictionsSummary(perms);
+    if (kind === "cursor-agent") {
+      materializeCursorPermissions(conversationWorkspace, perms);
+    }
     const runnerOpts: HarnessOptions = {
       ...baseRunnerOpts,
-      workspaceDir: path.join(
-        config.responder.workspace_dir,
-        safeDirName(question.conversation_id),
-      ),
+      workspaceDir: conversationWorkspace,
+      claudeSettingsJson: kind === "claude" ? claudeSettingsArg(perms) : undefined,
+      codexSandbox: kind === "codex" ? perms.codexSandbox : undefined,
+    };
+    const promptOpts = {
+      persona: config.responder.persona,
+      restrictions: perms.restrictions,
+      writeRoots: perms.writeRoots,
     };
     try {
       const existingSessionId = store.get(question.conversation_id);
@@ -82,8 +101,8 @@ export function createHandler(
         hops: question.hops,
       };
       const task = isFirstTurn
-        ? buildFirstTask(parsedPolicy.text, question.question, collectMemory(config), ctx)
-        : buildFollowupTask(parsedPolicy.text, question.question, ctx);
+        ? buildFirstTask(parsedPolicy.text, question.question, collectMemory(config), ctx, promptOpts)
+        : buildFollowupTask(parsedPolicy.text, question.question, ctx, promptOpts);
       const result = isFirstTurn
         ? await harness.runFirstTask(runnerOpts, task)
         : await harness.runFollowupTask(runnerOpts, existingSessionId as string, task);
