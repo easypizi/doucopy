@@ -1,6 +1,6 @@
 import { checkbox, confirm, input, select } from "@inquirer/prompts";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { hostname, homedir } from "node:os";
+import { hostname, homedir, userInfo } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { fetchStatus, joinRelay, normalizeRelayUrl } from "./api.js";
@@ -93,10 +93,43 @@ function parseFlags(argv: string[]): Flags {
   return flags;
 }
 
-function defaultName(): string {
-  const raw = hostname().replace(/\.local$/, "");
+function sanitizePeerName(raw: string): string {
   const sanitised = raw.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 64);
   return NAME_PATTERN.test(sanitised) ? sanitised : "";
+}
+
+function defaultName(): string {
+  return sanitizePeerName(hostname().replace(/\.local$/, ""));
+}
+
+function peerNameChoices(): { value: string; name: string }[] {
+  const host = defaultName();
+  let user = "";
+  try {
+    user = sanitizePeerName(userInfo().username);
+  } catch {
+    user = "";
+  }
+  const choices: { value: string; name: string }[] = [];
+  const seen = new Set<string>();
+  const add = (value: string, name: string) => {
+    if (!value || seen.has(value)) return;
+    seen.add(value);
+    choices.push({ value, name });
+  };
+  if (host) add(host, `${host} (hostname)`);
+  if (user) {
+    add(user, `${user} (username)`);
+    add(`${user}-mbp`, `${user}-mbp`);
+    add(`${user}-home`, `${user}-home`);
+    add(`${user}-work`, `${user}-work`);
+  }
+  add("personal", "personal");
+  add("work", "work");
+  add("home", "home");
+  add("laptop", "laptop");
+  add("__custom__", "Custom...");
+  return choices;
 }
 
 // Reads the existing connection (if any) so the wizard can offer a
@@ -214,8 +247,15 @@ async function askName(flag: string | undefined, interactive: boolean): Promise<
     return flag;
   }
   if (!interactive) throw new Error("peer name required (--name)");
+  const choices = peerNameChoices();
+  const picked = await select<string>({
+    message: "Peer name for this machine",
+    choices,
+    default: defaultName() || choices[0]?.value,
+  });
+  if (picked !== "__custom__") return picked;
   return input({
-    message: "Peer name for this machine (letters, digits, . _ -):",
+    message: "Custom peer name (letters, digits, . _ -):",
     default: defaultName(),
     validate: (v) => (NAME_PATTERN.test(v.trim()) ? true : "must match [A-Za-z0-9._-]{1,64}"),
   });
@@ -272,18 +312,52 @@ async function askSkillsInstall(flag: boolean | undefined, clients: Client[], ho
   });
 }
 
+const NEVER_REVEAL_PRESETS = [
+  { value: "password", name: "password" },
+  { value: "secret", name: "secret" },
+  { value: "api_key", name: "api_key" },
+  { value: "token", name: "token" },
+  { value: "Bearer", name: "Bearer" },
+  { value: "sk-", name: "sk- (OpenAI-style keys)" },
+  { value: "AKIA", name: "AKIA (AWS access key prefix)" },
+  { value: "private key", name: "private key" },
+  { value: "ssh-rsa", name: "ssh-rsa" },
+] as const;
+
 async function askNeverReveal(flag: string[] | undefined, interactive: boolean, asker: boolean): Promise<string[]> {
   if (flag) return flag;
   if (asker) return [];
   if (!interactive) return [];
+  const action = await select<"skip" | "pick" | "custom">({
+    message: "Anything the responder must never reveal?",
+    choices: [
+      { value: "skip", name: "Skip (nothing extra)" },
+      { value: "pick", name: "Pick from common presets" },
+      { value: "custom", name: "Type custom values only" },
+    ],
+    default: "skip",
+  });
+  if (action === "skip") return [];
+  let picked: string[] = [];
+  if (action === "pick") {
+    picked = await checkbox<string>({
+      message: "Never-reveal literals (space to toggle)",
+      choices: NEVER_REVEAL_PRESETS.map((p) => ({ value: p.value, name: p.name })),
+    });
+  }
+  const wantCustom = action === "custom"
+    ? true
+    : await confirm({
+        message: "Add custom never-reveal values?",
+        default: false,
+      });
+  if (!wantCustom) return picked;
   const raw = await input({
-    message: "Anything the responder must never reveal? (comma-separated, empty to skip)",
+    message: "Custom never-reveal values (comma-separated)",
     default: "",
   });
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const custom = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  return Array.from(new Set([...picked, ...custom]));
 }
 
 export async function runJoin(argv: string[]): Promise<void> {
@@ -365,15 +439,25 @@ export async function runJoin(argv: string[]): Promise<void> {
   if (discovery.agents_md_roots.length > 0) {
     console.log(`memory roots: ${discovery.agents_md_roots.join(", ")}`);
   }
-  let base = defaultConfig(relayUrl, peer, token, discovery) as {
-    responder: { harness?: HarnessKind; binary?: string; cursor_agent_binary?: string };
+  let base = defaultConfig(relayUrl, peer, token, discovery, home) as {
+    responder: {
+      harness?: HarnessKind;
+      binary?: string;
+      cursor_agent_binary?: string;
+      model?: string;
+    };
     restrictions?: RestrictionsSettings;
   };
   if (!askerOnly) {
     const harness = responder as HarnessKind;
     base.responder.harness = harness;
     base.responder.binary = harness;
-    if (harness !== "cursor-agent") delete base.responder.cursor_agent_binary;
+    if (harness === "cursor-agent") {
+      base.responder.model = "composer-2.5";
+    } else {
+      delete base.responder.cursor_agent_binary;
+      delete base.responder.model;
+    }
     base = applyRestrictions(base, restrictions) as typeof base;
   }
   const configPath = writeConfig(home, base);

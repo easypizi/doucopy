@@ -3,9 +3,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  CLAUDE_TRANSCRIPTS_GLOB,
+  CODEX_TRANSCRIPTS_GLOB,
+  CURSOR_TRANSCRIPTS_GLOB,
   defaultConfig,
   detectAskers,
   detectHarnesses,
+  detectTranscriptGlobs,
   discoverMemorySources,
   mergeClaudeMcp,
   mergeCodexToml,
@@ -31,8 +35,34 @@ describe("discoverMemorySources", () => {
     expect(found.extra_files).toEqual([path.join(home, ".cursor/SKILLS_INDEX.md")]);
   });
 
+  it("includes ~/.claude/CLAUDE.md when present", () => {
+    const home = makeHome();
+    mkdirSync(path.join(home, ".claude"), { recursive: true });
+    writeFileSync(path.join(home, ".claude/CLAUDE.md"), "claude memory");
+    const found = discoverMemorySources(home);
+    expect(found.extra_files).toEqual([path.join(home, ".claude/CLAUDE.md")]);
+  });
+
   it("returns empty lists for a bare home", () => {
     expect(discoverMemorySources(makeHome())).toEqual({ agents_md_roots: [], extra_files: [] });
+  });
+});
+
+describe("detectTranscriptGlobs", () => {
+  it("falls back to the Cursor glob when no transcript dirs exist", () => {
+    expect(detectTranscriptGlobs(makeHome())).toEqual([CURSOR_TRANSCRIPTS_GLOB]);
+  });
+
+  it("includes Claude and Codex globs when their dirs exist", () => {
+    const home = makeHome();
+    mkdirSync(path.join(home, ".cursor/projects"), { recursive: true });
+    mkdirSync(path.join(home, ".claude/projects"), { recursive: true });
+    mkdirSync(path.join(home, ".codex/sessions"), { recursive: true });
+    expect(detectTranscriptGlobs(home)).toEqual([
+      CURSOR_TRANSCRIPTS_GLOB,
+      CLAUDE_TRANSCRIPTS_GLOB,
+      CODEX_TRANSCRIPTS_GLOB,
+    ]);
   });
 });
 
@@ -41,12 +71,35 @@ describe("writeConfig", () => {
     const home = makeHome();
     const file = writeConfig(home, defaultConfig("https://r.example.com", "mbp", "tok", {
       agents_md_roots: [], extra_files: [],
-    }));
+    }, home));
     expect(file).toBe(path.join(home, ".doucopy/config.json"));
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as { self_peer: string; responder: { max_concurrent: number } };
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as {
+      self_peer: string;
+      responder: { max_concurrent: number; model?: string };
+      memory_sources: { transcripts_glob: string | string[] };
+    };
     expect(parsed.self_peer).toBe("mbp");
     expect(parsed.responder.max_concurrent).toBe(3);
+    expect(parsed.responder.model).toBeUndefined();
+    expect(parsed.memory_sources.transcripts_glob).toBe(CURSOR_TRANSCRIPTS_GLOB);
     expect(statSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it("writes multiple transcript globs when several harness homes exist", () => {
+    const home = makeHome();
+    mkdirSync(path.join(home, ".cursor/projects"), { recursive: true });
+    mkdirSync(path.join(home, ".claude/projects"), { recursive: true });
+    const file = writeConfig(
+      home,
+      defaultConfig("https://r.example.com", "mbp", "tok", { agents_md_roots: [], extra_files: [] }, home),
+    );
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as {
+      memory_sources: { transcripts_glob: string[] };
+    };
+    expect(parsed.memory_sources.transcripts_glob).toEqual([
+      CURSOR_TRANSCRIPTS_GLOB,
+      CLAUDE_TRANSCRIPTS_GLOB,
+    ]);
   });
 });
 

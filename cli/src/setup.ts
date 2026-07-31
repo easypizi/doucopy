@@ -1,6 +1,7 @@
 import fg from "fast-glob";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 
 export interface MemoryDiscovery {
@@ -46,6 +47,19 @@ export function renderPolicyWithNeverReveal(items: string[]): string {
   return DEFAULT_POLICY.replace(/- \n$/, `${bullets}\n`);
 }
 
+export const CURSOR_TRANSCRIPTS_GLOB = "~/.cursor/projects/*/agent-transcripts/**/*.jsonl";
+export const CLAUDE_TRANSCRIPTS_GLOB = "~/.claude/projects/**/*.jsonl";
+export const CODEX_TRANSCRIPTS_GLOB = "~/.codex/sessions/**/*.jsonl";
+
+/** Detect transcript globs from directories that exist under home. Fallback: Cursor glob. */
+export function detectTranscriptGlobs(home: string): string[] {
+  const globs: string[] = [];
+  if (existsSync(path.join(home, ".cursor", "projects"))) globs.push(CURSOR_TRANSCRIPTS_GLOB);
+  if (existsSync(path.join(home, ".claude", "projects"))) globs.push(CLAUDE_TRANSCRIPTS_GLOB);
+  if (existsSync(path.join(home, ".codex", "sessions"))) globs.push(CODEX_TRANSCRIPTS_GLOB);
+  return globs.length > 0 ? globs : [CURSOR_TRANSCRIPTS_GLOB];
+}
+
 export function discoverMemorySources(home: string): MemoryDiscovery {
   const agents_md_roots: string[] = [];
   for (const rel of DEV_ROOT_CANDIDATES) {
@@ -54,10 +68,13 @@ export function discoverMemorySources(home: string): MemoryDiscovery {
     const found = fg.sync("**/AGENTS.md", { cwd: root, deep: 4, suppressErrors: true });
     if (found.length > 0) agents_md_roots.push(root);
   }
+  const extra_files: string[] = [];
   const cursorDir = path.join(home, ".cursor");
-  const extra_files = existsSync(cursorDir)
-    ? fg.sync("*.md", { cwd: cursorDir, absolute: true, suppressErrors: true })
-    : [];
+  if (existsSync(cursorDir)) {
+    extra_files.push(...fg.sync("*.md", { cwd: cursorDir, absolute: true, suppressErrors: true }));
+  }
+  const claudeMd = path.join(home, ".claude", "CLAUDE.md");
+  if (existsSync(claudeMd)) extra_files.push(claudeMd);
   return { agents_md_roots, extra_files };
 }
 
@@ -66,13 +83,15 @@ export function defaultConfig(
   peer: string,
   token: string,
   discovery: MemoryDiscovery,
+  home: string = homedir(),
 ): object {
+  const globs = detectTranscriptGlobs(home);
   return {
     relay_url: relayUrl,
     self_peer: peer,
     token,
     memory_sources: {
-      transcripts_glob: "~/.cursor/projects/*/agent-transcripts/**/*.jsonl",
+      transcripts_glob: globs.length === 1 ? globs[0] : globs,
       agents_md_roots: discovery.agents_md_roots,
       extra_files: discovery.extra_files,
     },
@@ -81,7 +100,6 @@ export function defaultConfig(
       workspace_dir: "~/.doucopy/workspace",
       response_timeout_seconds: 300,
       max_concurrent: 3,
-      model: "composer-2.5",
     },
     restrictions: {
       fs_write: { mode: "workspace_only", allow: [] },

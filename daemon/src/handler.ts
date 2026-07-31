@@ -1,6 +1,6 @@
 import fg from "fast-glob";
 import path from "node:path";
-import { resolveHarness, type DaemonConfig } from "./config.js";
+import { normalizeTranscriptGlobs, resolveHarness, type DaemonConfig } from "./config.js";
 import type { ConversationStore } from "./conversations.js";
 import { createHarness, type Harness, type HarnessOptions } from "./harness.js";
 import { isPaused, pausedUntil } from "./paused.js";
@@ -17,7 +17,8 @@ import { applyRedactions, compileRedactRules } from "./redact.js";
 import { safeDirName } from "./workspace.js";
 
 function collectMemory(config: DaemonConfig): MemoryMap {
-  const transcript_files = fg.sync(config.memory_sources.transcripts_glob, { absolute: true });
+  const globs = normalizeTranscriptGlobs(config.memory_sources.transcripts_glob);
+  const transcript_files = fg.sync(globs, { absolute: true });
   const agents_md_files = config.memory_sources.agents_md_roots.flatMap((root) =>
     fg.sync(path.join(root, "**/AGENTS.md"), { absolute: true }),
   );

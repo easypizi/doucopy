@@ -22,9 +22,10 @@ npx doucopy join <relay-url> <invite>
 
 - asks which harness should answer questions (if more than one is present),
 - exchanges the invite for a peer token,
-- discovers memory sources (`~/.cursor/*.md` files, directories containing `AGENTS.md` under common dev roots),
+- discovers memory sources (`~/.cursor/*.md`, `~/.claude/CLAUDE.md` if present, directories containing `AGENTS.md` under common dev roots),
+- detects transcript globs from installed harness homes (`~/.cursor/projects`, `~/.claude/projects`, `~/.codex/sessions`). `memory_sources.transcripts_glob` may be a string or an array,
 - offers a restrictions step (write folders, read blocklist, shell). Skip keeps the safe default: workspace-only writes, shell off,
-- writes `~/.doucopy/config.json` (with `responder.harness` and `restrictions`) and `~/.doucopy/policy.md`,
+- writes `~/.doucopy/config.json` (with `responder.harness` and `restrictions`) and `~/.doucopy/policy.md`. Default `responder.model` is set only for `cursor-agent` (`composer-2.5`). Claude and Codex leave the model unset so the harness default applies,
 - merges the relay entry into every detected asker config:
   - `~/.cursor/mcp.json`,
   - `~/.claude.json`,
@@ -41,7 +42,7 @@ A machine that still has `~/.agent-link` from before the rename gets it moved to
 npx doucopy settings
 ```
 
-Sectioned menu: Restrictions, Filtering (`policy.md` + redact literals), Model, Persona, Harness. Writes config atomically and can restart the daemon at the end. `npx doucopy join` without arguments can also re-walk askers / responder / skills / policy / restrictions while reusing the existing peer token.
+Sectioned menu: Restrictions, Filtering (`policy.md` + redact literals), Model, Persona, Harness. Model presets are harness-aware (Cursor: composer-*, Claude: sonnet/opus/haiku/fable, Codex: gpt-5.6-*). Changing harness clears a model that is invalid for the new harness and re-prompts. Writes config atomically and can restart the daemon at the end. Prefer `make settings` from a repo checkout until the next npm publish. `npx doucopy join` without arguments can also re-walk askers / responder / skills / policy / restrictions while reusing the existing peer token.
 
 ## Verify
 

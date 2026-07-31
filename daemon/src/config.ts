@@ -33,7 +33,12 @@ export interface DaemonConfig {
   relay_url: string;
   self_peer: string;
   token: string;
-  memory_sources: { transcripts_glob: string; agents_md_roots: string[]; extra_files: string[] };
+  memory_sources: {
+    /** One glob or several (Cursor + Claude Code + Codex). Normalized to string[] on load. */
+    transcripts_glob: string | string[];
+    agents_md_roots: string[];
+    extra_files: string[];
+  };
   responder: {
     harness?: HarnessKind;
     binary?: string;
@@ -47,6 +52,12 @@ export interface DaemonConfig {
   };
   restrictions?: RestrictionsConfig;
   redact?: Partial<RedactConfig>;
+}
+
+/** Normalize transcripts_glob to a non-empty string array (after expandHome). */
+export function normalizeTranscriptGlobs(value: string | string[]): string[] {
+  const list = Array.isArray(value) ? value : [value];
+  return list.map((g) => g.trim()).filter((g) => g.length > 0);
 }
 
 const HARNESS_DEFAULT_BINARY: Record<HarnessKind, string> = {
@@ -146,11 +157,17 @@ export function loadConfig(filePath = "~/.doucopy/config.json"): DaemonConfig {
   if (!config.memory_sources || typeof config.memory_sources !== "object") {
     throw new Error("config: missing memory_sources");
   }
+  const rawGlob = config.memory_sources.transcripts_glob;
   if (
-    !config.memory_sources.transcripts_glob ||
-    typeof config.memory_sources.transcripts_glob !== "string"
+    rawGlob === undefined
+    || rawGlob === null
+    || rawGlob === ""
+    || (Array.isArray(rawGlob) && rawGlob.length === 0)
   ) {
     throw new Error("config: missing memory_sources.transcripts_glob");
+  }
+  if (typeof rawGlob !== "string" && !(Array.isArray(rawGlob) && rawGlob.every((v) => typeof v === "string"))) {
+    throw new Error("config: memory_sources.transcripts_glob must be a string or an array of strings");
   }
   if (!Array.isArray(config.memory_sources.agents_md_roots)) {
     throw new Error("config: missing memory_sources.agents_md_roots");
@@ -208,7 +225,10 @@ export function loadConfig(filePath = "~/.doucopy/config.json"): DaemonConfig {
     }
   }
   config.relay_url = config.relay_url.replace(/\/+$/, "");
-  config.memory_sources.transcripts_glob = expandHome(config.memory_sources.transcripts_glob);
+  config.memory_sources.transcripts_glob = normalizeTranscriptGlobs(config.memory_sources.transcripts_glob).map(expandHome);
+  if (config.memory_sources.transcripts_glob.length === 0) {
+    throw new Error("config: memory_sources.transcripts_glob must contain at least one non-empty glob");
+  }
   config.memory_sources.agents_md_roots = config.memory_sources.agents_md_roots.map(expandHome);
   config.memory_sources.extra_files = config.memory_sources.extra_files.map(expandHome);
   config.responder.workspace_dir = expandHome(config.responder.workspace_dir);

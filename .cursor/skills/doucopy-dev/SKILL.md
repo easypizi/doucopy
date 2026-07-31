@@ -66,6 +66,8 @@ docs/superpowers/     specs, plans
 9. **Per-conversation workspaces** are created via `safeDirName(conversation_id)`. Never write to the workspace root directly, parallel `cursor-agent` runs would clobber each other's `task.md`.
 10. **Legacy home migration is a one-way rename.** `migrateLegacyHome` moves `~/.agent-link` to `~/.doucopy` only when the new path doesn't exist yet. Do not make it copy or merge, a bare `renameSync` is the whole contract.
 11. **`buildPermissions` invariants** (`daemon/src/permissions.ts`): deny wins over allow in Cursor and Claude rule evaluation. Built-in read denials (`~/.ssh`, `~/.aws`, `~/.doucopy`) are always present and cannot be cleared by config. Missing `restrictions` means workspace-only writes and shell off. Do not put a blanket `Write(**)` deny under Cursor `--force`, it would also block the workspace because deny wins. Codex only gets a coarse `--sandbox` mapping.
+12. **`memory_sources.transcripts_glob`** may be a `string` or `string[]`. `loadConfig` normalizes to a non-empty `string[]` (expandHome on each). Default join detection adds Cursor / Claude Code / Codex globs when their home dirs exist. Do not hardcode Cursor-only paths in new defaults.
+13. **Responder model is harness-scoped.** Settings presets live in `cli/src/settings.ts` (`MODEL_PRESETS`). `defaultConfig` does not set `model`. Join sets `composer-2.5` only for `cursor-agent`. Switching harness in settings must not leave a foreign model id in place.
 
 ## Test map
 

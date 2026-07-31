@@ -1,4 +1,4 @@
-import { confirm, input, select } from "@inquirer/prompts";
+import { checkbox, confirm, input, select } from "@inquirer/prompts";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -155,6 +155,107 @@ function splitCsv(raw: string): string[] {
     .filter(Boolean);
 }
 
+const WRITE_ALLOW_PRESETS = [
+  "~/Desktop",
+  "~/Documents",
+  "~/Downloads",
+  "~/Movies",
+  "~/Music",
+  "~/Pictures",
+  "~/Public",
+  "/tmp",
+] as const;
+
+const READ_DENY_PRESETS = [
+  "~/Documents",
+  "~/Downloads",
+  "~/Desktop",
+  "~/Library",
+  "~/Movies",
+  "~/Pictures",
+  "~/.gnupg",
+  "~/.config",
+  "~/.kube",
+  "~/.docker",
+  "~/.npm",
+  "~/.local",
+  "~/Dropbox",
+  "~/Library/CloudStorage",
+] as const;
+
+const SHELL_DENY_PRESETS = [
+  "rm",
+  "sudo",
+  "curl",
+  "wget",
+  "ssh",
+  "scp",
+  "rsync",
+  "chmod",
+  "chown",
+  "kill",
+  "pkill",
+  "git push",
+  "git commit",
+  "brew",
+  "npm publish",
+  "npx",
+  "pip",
+  "docker",
+  "kubectl",
+  "heroku",
+  "osascript",
+  "open",
+] as const;
+
+const REDACT_LITERAL_PRESETS = [
+  "password",
+  "secret",
+  "api_key",
+  "token",
+  "Bearer",
+  "sk-",
+  "AKIA",
+] as const;
+
+async function pickPresetsWithCustom(
+  message: string,
+  presets: readonly string[],
+  current: string[],
+): Promise<string[]> {
+  const currentSet = new Set(current);
+  const picked = await checkbox<string>({
+    message: `${message} (space to toggle, enter to confirm)`,
+    choices: presets.map((p) => ({ value: p, name: p, checked: currentSet.has(p) })),
+  });
+  const extras = current.filter((v) => !(presets as readonly string[]).includes(v));
+  const merged = new Set<string>([...picked, ...extras]);
+  let addMore = await select<"done" | "custom">({
+    message: `${message}: add custom values?`,
+    choices: [
+      { value: "done", name: "Done (use selection above)" },
+      { value: "custom", name: "Add custom values..." },
+    ],
+    default: extras.length > 0 ? "custom" : "done",
+  });
+  while (addMore === "custom") {
+    const extraRaw = await input({
+      message: "Custom values (comma-separated)",
+      default: extras.join(", "),
+    });
+    for (const v of splitCsv(extraRaw)) merged.add(v);
+    addMore = await select<"done" | "custom">({
+      message: "Add more custom values?",
+      choices: [
+        { value: "done", name: "Done" },
+        { value: "custom", name: "Add more..." },
+      ],
+      default: "done",
+    });
+  }
+  return Array.from(merged);
+}
+
 async function editRestrictionsInteractive(current: RestrictionsSettings): Promise<RestrictionsSettings> {
   console.log(`Current restrictions: ${summarizeRestrictions(current)}`);
   const writeMode = await select<FsWriteMode>({
@@ -165,20 +266,19 @@ async function editRestrictionsInteractive(current: RestrictionsSettings): Promi
     ],
     default: current.fs_write.mode,
   });
-  let allow = current.fs_write.allow;
+  let allow: string[] = [];
   if (writeMode === "custom") {
-    const raw = await input({
-      message: "Extra write-allow folders (comma-separated, e.g. ~/Desktop)",
-      default: allow.join(", "),
-    });
-    allow = splitCsv(raw);
-  } else {
-    allow = [];
+    allow = await pickPresetsWithCustom(
+      "Extra write-allow folders",
+      WRITE_ALLOW_PRESETS,
+      current.fs_write.allow,
+    );
   }
-  const readRaw = await input({
-    message: "Extra read-deny folders (comma-separated, empty for none). ~/.ssh ~/.aws ~/.doucopy always denied.",
-    default: current.fs_read.deny.join(", "),
-  });
+  const readDeny = await pickPresetsWithCustom(
+    "Extra read-deny folders (~/.ssh, ~/.aws, ~/.doucopy always denied)",
+    READ_DENY_PRESETS,
+    current.fs_read.deny,
+  );
   const shellMode = await select<ShellMode>({
     message: "Shell mode",
     choices: [
@@ -188,21 +288,111 @@ async function editRestrictionsInteractive(current: RestrictionsSettings): Promi
     ],
     default: current.shell.mode,
   });
-  let shellDeny = current.shell.deny;
+  let shellDeny: string[] = [];
   if (shellMode === "deny_patterns") {
-    const raw = await input({
-      message: "Shell deny patterns (comma-separated, e.g. rm, curl, git push)",
-      default: shellDeny.join(", "),
-    });
-    shellDeny = splitCsv(raw);
-  } else {
-    shellDeny = [];
+    shellDeny = await pickPresetsWithCustom(
+      "Shell deny patterns",
+      SHELL_DENY_PRESETS,
+      current.shell.deny,
+    );
   }
   return {
     fs_write: { mode: writeMode, allow },
-    fs_read: { deny: splitCsv(readRaw) },
+    fs_read: { deny: readDeny },
     shell: { mode: shellMode, deny: shellDeny },
   };
+}
+
+/** Model ids offered in settings, keyed by responder harness. */
+export const MODEL_PRESETS: Record<HarnessKind, readonly string[]> = {
+  "cursor-agent": [
+    "composer-2.5",
+    "composer-2.5-fast",
+    "auto",
+    "gpt-5",
+    "sonnet-4-thinking",
+  ],
+  claude: ["sonnet", "opus", "haiku", "fable", "claude-sonnet-5", "claude-opus-4-8"],
+  codex: [
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5",
+    "gpt-5.2",
+  ],
+};
+
+export function modelPresetsFor(harness: HarnessKind): readonly string[] {
+  return MODEL_PRESETS[harness];
+}
+
+export function isModelValidForHarness(model: string | undefined, harness: HarnessKind): boolean {
+  if (model === undefined || model.trim() === "") return true;
+  return (MODEL_PRESETS[harness] as readonly string[]).includes(model);
+}
+
+const PERSONA_PRESETS = [
+  { id: "concise", label: "Concise, friendly", value: "Reply concisely with a friendly tone. Cite files or dates when helpful." },
+  { id: "detailed", label: "Detailed with reasoning", value: "Show short reasoning and cite the source (file path, date, transcript)." },
+  { id: "bullet", label: "Bullet points only", value: "Answer using short bullet points only. No preamble. Cite sources when helpful." },
+  { id: "strict", label: "Strict factual", value: "Answer only from the listed memory sources. If unknown, say you do not know. No speculation." },
+  { id: "teacher", label: "Teach / explain", value: "Explain clearly as if teaching a teammate. Use short examples. Cite where the fact came from." },
+] as const;
+
+async function pickModel(current: string | undefined, harness: HarnessKind): Promise<string> {
+  const CUSTOM = "__custom__";
+  const DEFAULT = "__default__";
+  const presets = modelPresetsFor(harness);
+  const currentIsPreset = current !== undefined && (presets as readonly string[]).includes(current);
+  const initial = current === undefined || current === "" ? DEFAULT : currentIsPreset ? current : CUSTOM;
+  const choice = await select<string>({
+    message: `Responder model (${harness})`,
+    choices: [
+      { value: DEFAULT, name: "(harness default)" },
+      ...presets.map((m) => ({ value: m, name: m })),
+      { value: CUSTOM, name: "Custom..." },
+    ],
+    default: initial,
+  });
+  if (choice === DEFAULT) return "";
+  if (choice !== CUSTOM) return choice;
+  return input({
+    message: "Custom model id",
+    default: currentIsPreset ? "" : current ?? "",
+  });
+}
+
+async function pickPersona(current: string | undefined): Promise<string> {
+  const CUSTOM = "__custom__";
+  const NONE = "__none__";
+  const match = PERSONA_PRESETS.find((p) => p.value === current);
+  const initial = current === undefined || current.trim() === "" ? NONE : match?.id ?? CUSTOM;
+  const choice = await select<string>({
+    message: "Persona / response style",
+    choices: [
+      { value: NONE, name: "(none)" },
+      ...PERSONA_PRESETS.map((p) => ({ value: p.id, name: p.label })),
+      { value: CUSTOM, name: "Custom..." },
+    ],
+    default: initial,
+  });
+  if (choice === NONE) return "";
+  if (choice === CUSTOM) {
+    return input({
+      message: "Custom persona (single line)",
+      default: match ? "" : current ?? "",
+    });
+  }
+  const preset = PERSONA_PRESETS.find((p) => p.id === choice);
+  return preset ? preset.value : "";
+}
+
+async function pickRedactLiterals(current: string[]): Promise<string[]> {
+  return pickPresetsWithCustom(
+    "Redact literals (stripped from every answer)",
+    REDACT_LITERAL_PRESETS,
+    current,
+  );
 }
 
 function openPolicyEditor(home: string): void {
@@ -292,30 +482,22 @@ export async function runSettings(home: string = homedir()): Promise<void> {
         default: true,
       });
       if (openPolicy) openPolicyEditor(home);
-      const literalsRaw = await input({
-        message: "Redact literals (comma-separated, stripped from every answer)",
-        default: (config.redact?.literals ?? []).join(", "),
-      });
-      config = applyRedactLiterals(config, splitCsv(literalsRaw));
+      const literals = await pickRedactLiterals(config.redact?.literals ?? []);
+      config = applyRedactLiterals(config, literals);
       dirty = true;
       section = "menu";
       continue;
     }
     if (section === "model") {
-      const model = await input({
-        message: "Responder model id (empty = harness default)",
-        default: config.responder?.model ?? "",
-      });
+      const harness = config.responder?.harness ?? "cursor-agent";
+      const model = await pickModel(config.responder?.model, harness);
       config = applyResponderField(config, "model", model);
       dirty = true;
       section = "menu";
       continue;
     }
     if (section === "persona") {
-      const persona = await input({
-        message: "Persona / response style (empty to clear)",
-        default: config.responder?.persona ?? "",
-      });
+      const persona = await pickPersona(config.responder?.persona);
       config = applyResponderField(config, "persona", persona);
       dirty = true;
       section = "menu";
@@ -323,6 +505,7 @@ export async function runSettings(home: string = homedir()): Promise<void> {
     }
     if (section === "harness") {
       const detected = detectResponders();
+      const previous = config.responder?.harness ?? "cursor-agent";
       const harness = await select<HarnessKind>({
         message: "Responder harness",
         choices: [
@@ -330,9 +513,14 @@ export async function runSettings(home: string = homedir()): Promise<void> {
           { value: "claude", name: "claude", disabled: detected.claude ? false : "(not found on PATH)" },
           { value: "codex", name: "codex", disabled: detected.codex ? false : "(not found on PATH)" },
         ],
-        default: config.responder?.harness ?? "cursor-agent",
+        default: previous,
       });
       config = applyHarness(config, harness);
+      if (harness !== previous && !isModelValidForHarness(config.responder?.model, harness)) {
+        console.log(`Model "${config.responder?.model ?? ""}" is not valid for ${harness}. Pick a new one.`);
+        const model = await pickModel(undefined, harness);
+        config = applyResponderField(config, "model", model);
+      }
       dirty = true;
       section = "menu";
       continue;

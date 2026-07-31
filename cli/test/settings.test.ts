@@ -7,6 +7,8 @@ import {
   applyRedactLiterals,
   applyResponderField,
   applyRestrictions,
+  isModelValidForHarness,
+  modelPresetsFor,
   readConfigFile,
   restrictionsFromConfig,
   SAFE_RESTRICTIONS,
@@ -75,5 +77,21 @@ describe("settings helpers", () => {
     );
     expect(config.responder?.persona).toBeUndefined();
     expect(config.responder?.model).toBe("m");
+  });
+
+  it("exposes per-harness model presets", () => {
+    expect(modelPresetsFor("cursor-agent")).toContain("composer-2.5");
+    expect(modelPresetsFor("claude")).toEqual(expect.arrayContaining(["sonnet", "opus", "haiku"]));
+    expect(modelPresetsFor("codex")).toEqual(expect.arrayContaining(["gpt-5.6-sol", "gpt-5.6-terra"]));
+    expect(modelPresetsFor("claude")).not.toContain("composer-2.5");
+    expect(modelPresetsFor("cursor-agent")).not.toContain("sonnet");
+  });
+
+  it("detects when a model is invalid for a harness after a switch", () => {
+    expect(isModelValidForHarness("composer-2.5", "cursor-agent")).toBe(true);
+    expect(isModelValidForHarness("composer-2.5", "claude")).toBe(false);
+    expect(isModelValidForHarness("sonnet", "claude")).toBe(true);
+    expect(isModelValidForHarness(undefined, "codex")).toBe(true);
+    expect(isModelValidForHarness("", "codex")).toBe(true);
   });
 });

@@ -23,7 +23,7 @@ That's it. The wizard configures Cursor, Claude Code and Codex, installs a respo
 
 Every AI coding agent keeps its memory in a silo. Your Cursor at work doesn't know what your Claude Code at home decided yesterday. Your personal account can't see the conversations on your other account. And nobody's agent can ask a colleague's agent a question.
 
-doucopy connects them. Each machine answers questions **from its own local memory** (agent transcripts, `AGENTS.md`, notes) using its own agent CLI. Raw data never leaves the machine, only the written answer does, filtered through local policy and tool restrictions you control.
+doucopy connects them. Each machine answers questions **from its own local memory** (Cursor / Claude Code / Codex transcripts, `AGENTS.md`, notes) using its own agent CLI. Raw data never leaves the machine, only the written answer does, filtered through local policy and tool restrictions you control.
 
 **Use cases:**
 
@@ -147,7 +147,7 @@ Skills installed during join (wizard step 4) tell the agent when to call `ask_pe
 ```bash
 npx doucopy chat                      # interactive REPL: colored peers table, /use <peer>, then type
 npx doucopy status                    # daemon, peers, dialogs, paused peers, coloured status
-npx doucopy settings                  # restrictions, filtering, model, persona, harness
+npx doucopy settings                  # restrictions, filtering, harness-aware model, persona, harness
 npx doucopy policy                    # opens ~/.doucopy/policy.md in $EDITOR
 npx doucopy logs -f                   # tail the responder log
 npx doucopy pause work-mbp --for 2h   # refuse questions from a peer
@@ -162,11 +162,11 @@ Every command has a `make` alias for a repo checkout: `make chat`, `make status`
 
 Three layers on every answering machine:
 
-1. **Harness permissions** (default: write only inside the responder workspace, shell off). Built-in read denials always include `~/.ssh`, `~/.aws`, `~/.doucopy`. Edit with `npx doucopy settings`.
+1. **Harness permissions** (default: write only inside the responder workspace, shell off). Built-in read denials always include `~/.ssh`, `~/.aws`, `~/.doucopy`. Edit with `npx doucopy settings` (or `make settings` from a checkout). Model presets follow the chosen harness (Cursor / Claude Code / Codex).
 2. **`policy.md`** soft instructions for topics and tone.
 3. **`## Never reveal` / redact** hard post-filter on every outgoing answer.
 
-Codex only supports coarse `--sandbox` modes, so per-path write allows are approximate there.
+Memory sources cover Cursor, Claude Code and Codex transcript dirs when present. Codex only supports coarse `--sandbox` modes, so per-path write allows are approximate there.
 
 ### MCP reference
 

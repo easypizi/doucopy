@@ -88,11 +88,15 @@ function rootsCover(pathToCheck: string, roots: string[]): boolean {
 
 function memoryReadAllows(config: DaemonConfig): string[] {
   const allows = new Set<string>();
-  const glob = config.memory_sources.transcripts_glob;
-  // Prefer the directory prefix before the first glob metacharacter.
-  const meta = glob.search(/[*?[]/);
-  const prefix = meta >= 0 ? glob.slice(0, meta).replace(/\/+$/, "") : path.dirname(glob);
-  if (prefix) allows.add(prefix);
+  const globs = Array.isArray(config.memory_sources.transcripts_glob)
+    ? config.memory_sources.transcripts_glob
+    : [config.memory_sources.transcripts_glob];
+  for (const glob of globs) {
+    // Prefer the directory prefix before the first glob metacharacter.
+    const meta = glob.search(/[*?[]/);
+    const prefix = meta >= 0 ? glob.slice(0, meta).replace(/\/+$/, "") : path.dirname(glob);
+    if (prefix) allows.add(prefix);
+  }
   for (const root of config.memory_sources.agents_md_roots) allows.add(root);
   for (const file of config.memory_sources.extra_files) allows.add(path.dirname(file));
   return [...allows];

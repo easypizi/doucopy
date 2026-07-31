@@ -145,4 +145,65 @@ describe("loadConfig", () => {
     writeFileSync(file, JSON.stringify({ ...VALID, responder: { ...VALID.responder, persona: 1 } }));
     expect(() => loadConfig(file)).toThrow(/persona/);
   });
+
+  it("accepts transcripts_glob as a string and expands home", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-"));
+    const file = path.join(dir, "config.json");
+    writeFileSync(file, JSON.stringify(VALID));
+    const config = loadConfig(file);
+    expect(config.memory_sources.transcripts_glob).toEqual([
+      path.join(homedir(), ".cursor/projects/*/agent-transcripts/*.jsonl"),
+    ]);
+  });
+
+  it("accepts transcripts_glob as an array and expands each entry", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-"));
+    const file = path.join(dir, "config.json");
+    writeFileSync(
+      file,
+      JSON.stringify({
+        ...VALID,
+        memory_sources: {
+          ...VALID.memory_sources,
+          transcripts_glob: [
+            "~/.cursor/projects/*/agent-transcripts/**/*.jsonl",
+            "~/.claude/projects/**/*.jsonl",
+            "~/.codex/sessions/**/*.jsonl",
+          ],
+        },
+      }),
+    );
+    const config = loadConfig(file);
+    expect(config.memory_sources.transcripts_glob).toEqual([
+      path.join(homedir(), ".cursor/projects/*/agent-transcripts/**/*.jsonl"),
+      path.join(homedir(), ".claude/projects/**/*.jsonl"),
+      path.join(homedir(), ".codex/sessions/**/*.jsonl"),
+    ]);
+  });
+
+  it("rejects transcripts_glob that is neither string nor string array", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-"));
+    const file = path.join(dir, "config.json");
+    writeFileSync(
+      file,
+      JSON.stringify({
+        ...VALID,
+        memory_sources: { ...VALID.memory_sources, transcripts_glob: { bad: true } },
+      }),
+    );
+    expect(() => loadConfig(file)).toThrow(/transcripts_glob/);
+  });
+
+  it("rejects an empty transcripts_glob array", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-"));
+    const file = path.join(dir, "config.json");
+    writeFileSync(
+      file,
+      JSON.stringify({
+        ...VALID,
+        memory_sources: { ...VALID.memory_sources, transcripts_glob: [] },
+      }),
+    );
+    expect(() => loadConfig(file)).toThrow(/transcripts_glob/);
+  });
 });

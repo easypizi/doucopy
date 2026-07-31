@@ -115,6 +115,27 @@ describe("buildPermissions", () => {
     expect(perms.claude.permissions.allow).toContain("Read");
   });
 
+  it("allows read prefixes for every transcripts_glob entry", () => {
+    const workspace = path.join(homedir(), ".doucopy/workspace/conv1");
+    const perms = buildPermissions(
+      baseConfig({
+        memory_sources: {
+          transcripts_glob: [
+            path.join(homedir(), ".cursor/projects/*/agent-transcripts/**/*.jsonl"),
+            path.join(homedir(), ".claude/projects/**/*.jsonl"),
+            path.join(homedir(), ".codex/sessions/**/*.jsonl"),
+          ],
+          agents_md_roots: [],
+          extra_files: [],
+        },
+      }),
+      workspace,
+    );
+    expect(perms.cursor.permissions.allow.some((a) => a.includes(".cursor/projects"))).toBe(true);
+    expect(perms.cursor.permissions.allow.some((a) => a.includes(".claude/projects"))).toBe(true);
+    expect(perms.cursor.permissions.allow.some((a) => a.includes(".codex/sessions"))).toBe(true);
+  });
+
   it("emits three harness formats and materializes cursor cli.json", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "doucopy-perms-"));
     const workspace = path.join(dir, "workspace");
