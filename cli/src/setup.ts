@@ -236,6 +236,25 @@ export function mergeClaudeMcp(home: string, relayUrl: string, token: string): s
   return file;
 }
 
+/** Escape a value for a double-quoted TOML string. */
+export function tomlQuoted(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+/**
+ * Codex MCP block for ~/.codex/config.toml.
+ * Codex >= 0.146 rejects `bearer_token` on streamable HTTP. Use http_headers.
+ * Re-running join/setup replaces any older bearer_token block.
+ */
+export function codexDoucopyMcpBlock(relayUrl: string, token: string): string[] {
+  const url = `${relayUrl.replace(/\/+$/, "")}/mcp`;
+  return [
+    "[mcp_servers.doucopy]",
+    `url = "${tomlQuoted(url)}"`,
+    `http_headers = { Authorization = "Bearer ${tomlQuoted(token)}" }`,
+  ];
+}
+
 // Merges the [mcp_servers.doucopy] block into ~/.codex/config.toml.
 // A line-based parser is used instead of a regex so section bodies that
 // contain "[" (e.g. TOML arrays like `enabled_tools = ["x"]`) aren't cut
@@ -245,12 +264,7 @@ export function mergeCodexToml(home: string, relayUrl: string, token: string): s
   const dir = path.join(home, ".codex");
   const file = path.join(dir, "config.toml");
   mkdirSync(dir, { recursive: true });
-  const url = `${relayUrl.replace(/\/+$/, "")}/mcp`;
-  const block = [
-    "[mcp_servers.doucopy]",
-    `url = "${url}"`,
-    `bearer_token = "${token}"`,
-  ];
+  const block = codexDoucopyMcpBlock(relayUrl, token);
   let existing = "";
   if (existsSync(file)) {
     existing = readFileSync(file, "utf8");

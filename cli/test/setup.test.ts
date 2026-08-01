@@ -191,18 +191,19 @@ describe("mergeClaudeMcp", () => {
 });
 
 describe("mergeCodexToml", () => {
-  it("writes a fresh ~/.codex/config.toml with the doucopy section", () => {
+  it("writes a fresh ~/.codex/config.toml with http_headers auth", () => {
     const home = makeHome();
     const file = mergeCodexToml(home, "https://r.example.com", "tok-x");
     expect(file).toBe(path.join(home, ".codex/config.toml"));
     const contents = readFileSync(file, "utf8");
     expect(contents).toContain("[mcp_servers.doucopy]");
     expect(contents).toContain('url = "https://r.example.com/mcp"');
-    expect(contents).toContain('bearer_token = "tok-x"');
+    expect(contents).toContain('http_headers = { Authorization = "Bearer tok-x" }');
+    expect(contents).not.toContain("bearer_token");
     expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 
-  it("keeps unrelated sections and replaces an existing doucopy block", () => {
+  it("keeps unrelated sections and replaces legacy bearer_token with http_headers", () => {
     const home = makeHome();
     mkdirSync(path.join(home, ".codex"), { recursive: true });
     const file = path.join(home, ".codex/config.toml");
@@ -224,11 +225,18 @@ describe("mergeCodexToml", () => {
     const contents = readFileSync(file, "utf8");
     expect(contents).toContain('approval_policy = "on-request"');
     expect(contents).toContain('url = "https://new.example.com/mcp"');
-    expect(contents).toContain('bearer_token = "new-tok"');
+    expect(contents).toContain('http_headers = { Authorization = "Bearer new-tok" }');
     expect(contents).not.toContain("old.example.com");
-    expect(contents).not.toContain('bearer_token = "old"');
+    expect(contents).not.toContain("bearer_token");
     expect(contents).toContain("[mcp_servers.other]");
     expect(readFileSync(`${file}.bak`, "utf8")).toContain("old.example.com");
+  });
+
+  it("escapes quotes inside the token for TOML", () => {
+    const home = makeHome();
+    mergeCodexToml(home, "https://r.example.com", 'tok"with\\quote');
+    const contents = readFileSync(path.join(home, ".codex/config.toml"), "utf8");
+    expect(contents).toContain('http_headers = { Authorization = "Bearer tok\\"with\\\\quote" }');
   });
 
   it("drops a legacy [mcp_servers.agent-link] block on upgrade", () => {

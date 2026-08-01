@@ -29,7 +29,7 @@ npx doucopy join <relay-url> <invite>
 - merges the relay entry into every detected asker config:
   - `~/.cursor/mcp.json`,
   - `~/.claude.json`,
-  - `~/.codex/config.toml` (as `[mcp_servers.doucopy]` with `bearer_token`),
+  - `~/.codex/config.toml` (as `[mcp_servers.doucopy]` with `url` + `http_headers` Authorization. Codex >= 0.146 rejects `bearer_token` on streamable HTTP),
   each with a `.bak` backup,
 - installs the launchd responder at `~/Library/LaunchAgents/com.doucopy.responder.plist`,
 - polls the relay `/status` endpoint until the daemon reports online.
