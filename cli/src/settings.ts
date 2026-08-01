@@ -198,7 +198,7 @@ function splitCsv(raw: string): string[] {
     .filter(Boolean);
 }
 
-const WRITE_ALLOW_PRESETS = [
+export const WRITE_ALLOW_PRESETS = [
   "~/Desktop",
   "~/Documents",
   "~/Downloads",
@@ -209,7 +209,7 @@ const WRITE_ALLOW_PRESETS = [
   "/tmp",
 ] as const;
 
-const READ_DENY_PRESETS = [
+export const READ_DENY_PRESETS = [
   "~/Documents",
   "~/Downloads",
   "~/Desktop",
@@ -226,7 +226,7 @@ const READ_DENY_PRESETS = [
   "~/Library/CloudStorage",
 ] as const;
 
-const SHELL_DENY_PRESETS = [
+export const SHELL_DENY_PRESETS = [
   "rm",
   "sudo",
   "curl",
@@ -251,7 +251,7 @@ const SHELL_DENY_PRESETS = [
   "open",
 ] as const;
 
-const REDACT_LITERAL_PRESETS = [
+export const REDACT_LITERAL_PRESETS = [
   "password",
   "secret",
   "api_key",

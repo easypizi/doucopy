@@ -435,11 +435,53 @@ export async function runJoin(argv: string[]): Promise<void> {
     if (chosen !== "skip") restrictions = chosen;
   }
 
+  const result = await finalizeJoin(home, {
+    relayUrl,
+    peer,
+    token,
+    askers,
+    responder,
+    wantSkills,
+    neverReveal,
+    restrictions,
+  });
+  for (const line of result.messages) console.log(line);
+  if (!result.ok) {
+    for (const line of result.errors) console.error(line);
+    process.exitCode = 1;
+  }
+}
+
+export type JoinClient = Client;
+export type JoinResponderChoice = ResponderChoice;
+
+export interface JoinFinalizeInput {
+  relayUrl: string;
+  peer: string;
+  token: string;
+  askers: Client[];
+  responder: ResponderChoice;
+  wantSkills: boolean;
+  neverReveal: string[];
+  restrictions: RestrictionsSettings;
+}
+
+export interface JoinFinalizeResult {
+  ok: boolean;
+  messages: string[];
+  errors: string[];
+}
+
+/** Shared by interactive join and the Ink Setup wizard. */
+export async function finalizeJoin(home: string, input: JoinFinalizeInput): Promise<JoinFinalizeResult> {
+  const messages: string[] = [];
+  const errors: string[] = [];
+  const askerOnly = input.responder === "asker-only";
   const discovery = discoverMemorySources(home);
   if (discovery.agents_md_roots.length > 0) {
-    console.log(`memory roots: ${discovery.agents_md_roots.join(", ")}`);
+    messages.push(`memory roots: ${discovery.agents_md_roots.join(", ")}`);
   }
-  let base = defaultConfig(relayUrl, peer, token, discovery, home) as {
+  let base = defaultConfig(input.relayUrl, input.peer, input.token, discovery, home) as {
     responder: {
       harness?: HarnessKind;
       binary?: string;
@@ -449,7 +491,7 @@ export async function runJoin(argv: string[]): Promise<void> {
     restrictions?: RestrictionsSettings;
   };
   if (!askerOnly) {
-    const harness = responder as HarnessKind;
+    const harness = input.responder as HarnessKind;
     base.responder.harness = harness;
     base.responder.binary = harness;
     if (harness === "cursor-agent") {
@@ -458,18 +500,18 @@ export async function runJoin(argv: string[]): Promise<void> {
       delete base.responder.cursor_agent_binary;
       delete base.responder.model;
     }
-    base = applyRestrictions(base, restrictions) as typeof base;
+    base = applyRestrictions(base, input.restrictions) as typeof base;
   }
-  const configPath = writeConfig(home, base);
-  console.log(`wrote ${configPath}`);
-  if (writeDefaultPolicy(home, neverReveal)) console.log("wrote default ~/.doucopy/policy.md");
+  const configFile = writeConfig(home, base);
+  messages.push(`wrote ${configFile}`);
+  if (writeDefaultPolicy(home, input.neverReveal)) messages.push("wrote default ~/.doucopy/policy.md");
 
-  if (askers.includes("cursor")) console.log(`updated ${mergeMcpJson(home, relayUrl, token)}`);
-  if (askers.includes("claude")) console.log(`updated ${mergeClaudeMcp(home, relayUrl, token)}`);
-  if (askers.includes("codex")) console.log(`updated ${mergeCodexToml(home, relayUrl, token)}`);
+  if (input.askers.includes("cursor")) messages.push(`updated ${mergeMcpJson(home, input.relayUrl, input.token)}`);
+  if (input.askers.includes("claude")) messages.push(`updated ${mergeClaudeMcp(home, input.relayUrl, input.token)}`);
+  if (input.askers.includes("codex")) messages.push(`updated ${mergeCodexToml(home, input.relayUrl, input.token)}`);
 
-  if (wantSkills) {
-    const skillClients = askers.filter((c): c is SkillsClient => c === "cursor" || c === "claude");
+  if (input.wantSkills) {
+    const skillClients = input.askers.filter((c): c is SkillsClient => c === "cursor" || c === "claude");
     if (skillClients.length > 0) {
       const result = installGlobalSkills({ home, clients: skillClients });
       const installed = result.filter((r) => r.status === "installed").length;
@@ -480,36 +522,38 @@ export async function runJoin(argv: string[]): Promise<void> {
       if (updated > 0) parts.push(`${updated} updated`);
       if (unchanged > 0) parts.push(`${unchanged} already up to date`);
       const summary = parts.length > 0 ? parts.join(", ") : "no changes";
-      console.log(`skills (${skillClients.join(" and ")}): ${summary}`);
+      messages.push(`skills (${skillClients.join(" and ")}): ${summary}`);
     }
   }
 
   if (askerOnly) {
     clearDraft(home);
-    console.log("asker-only mode: responder daemon not installed");
-    console.log("restart your coding agent (Cursor / Claude Code / Codex) so it picks up the doucopy MCP server");
-    console.log(`run "doucopy chat" to start asking peers`);
-    return;
+    messages.push("asker-only mode: responder daemon not installed");
+    messages.push("restart your coding agent (Cursor / Claude Code / Codex) so it picks up the doucopy MCP server");
+    messages.push('run "doucopy chat" to start asking peers');
+    return { ok: true, messages, errors };
   }
 
   installDaemon(home);
-  console.log("installed and started the responder daemon");
+  messages.push("installed and started the responder daemon");
 
   for (let i = 0; i < 15; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 2000));
     try {
-      const status = await fetchStatus(relayUrl, token);
+      const status = await fetchStatus(input.relayUrl, input.token);
       if (status.self_online) {
         clearDraft(home);
-        console.log("daemon is online, setup complete");
-        console.log("restart your coding agent (Cursor / Claude Code / Codex) so it picks up the doucopy MCP server");
-        console.log(`run "doucopy chat" to open the terminal REPL, or "doucopy policy" to edit the filter`);
-        return;
+        messages.push("daemon is online, setup complete");
+        messages.push("restart your coding agent (Cursor / Claude Code / Codex) so it picks up the doucopy MCP server");
+        messages.push('run "doucopy chat" to open the terminal REPL, or "doucopy policy" to edit the filter');
+        return { ok: true, messages, errors };
       }
     } catch {
       // relay may briefly reject while the daemon warms up, keep waiting
     }
   }
-  console.error("daemon did not come online within 30s, check: doucopy logs");
-  process.exitCode = 1;
+  errors.push("daemon did not come online within 30s, check: doucopy logs");
+  return { ok: false, messages, errors };
 }
+
+export { peerNameChoices, defaultName, NAME_PATTERN, NEVER_REVEAL_PRESETS };

@@ -1,11 +1,11 @@
 ---
 name: doucopy-ask
-description: "Use when asking another machine's agent something via doucopy (ask_peer, list_peers, check_reply MCP tools). Covers picking a peer, writing a self-contained question, choosing timeout_seconds, handling all four response statuses, follow-ups via conversation_id, and recovering timed-out answers with check_reply. When running inside ~/.doucopy/workspace you are the responder, use doucopy-answer for the general workflow — the only exception is a single counter-question (see Guard)."
+description: "Use when asking another machine's agent something via doucopy (ask_peer, list_peers, check_reply MCP tools). Covers picking a peer, writing a self-contained question, waiting out pending with check_reply (silent poll / long-poll), handling all response statuses, follow-ups via conversation_id, and Claude Code / MCP host abort quirks. When running inside ~/.doucopy/workspace you are the responder, use doucopy-answer for the general workflow — the only exception is a single counter-question (see Guard)."
 ---
 
 # doucopy: asking side
 
-You are on the **asking** side of a doucopy pair. Your job is to formulate a question the other machine's agent can answer from its own memory, dispatch it via the `ask_peer` MCP tool, and interpret the reply.
+You are on the **asking** side of a doucopy pair. Your job is to formulate a question the other machine's agent can answer from its own memory, dispatch it via the `ask_peer` MCP tool, and **deliver the final answer** (not stop at `pending`).
 
 ## Guard: are you actually the asker?
 
@@ -22,26 +22,44 @@ There is exactly one exception. If, and only if, you need a clarifying fact from
 
 1. **Pick a peer.** Call `list_peers`. Only online peers can answer immediately; offline ones will get the question when they come back but you won't get a synchronous reply.
 2. **Write a self-contained question.** The responder does not share your chat context, files, or open editor. Include the timeframe, product, and any names it needs. No pronouns without antecedents.
-3. **Choose `timeout_seconds`.** Default is 120s, max 240s. Set higher (180-240) if the responder must grep many months of transcripts; keep at default for simple lookups.
-4. **Call `ask_peer`.** Save both `ticket_id` and `conversation_id` from the reply.
-5. **Interpret the status** (table below).
-6. **Follow up in the same thread** by passing the same `conversation_id` on the next `ask_peer` call. The responder resumes the same `cursor-agent` chat, so it remembers the prior turn without you restating context.
+3. **Call `ask_peer`.** Save both `ticket_id` and `conversation_id`.
+4. **Wait until settled** using the protocol below. Do not hand a bare `pending` back to the user as if the task were done.
+5. **Follow up in the same thread** by passing the same `conversation_id` on the next `ask_peer` call. The responder resumes the same agent chat, so it remembers the prior turn without you restating context.
+
+## Waiting for the answer (mandatory)
+
+Many MCP hosts (Claude Code especially) **abort long tool calls after a few seconds**. Then `ask_peer` returns `pending` even while the peer is still working. That is normal, not a failure.
+
+**Do this every time** for an online peer (or when the user asked you to wait for the answer):
+
+1. Prefer a **short** first wait: `ask_peer(..., timeout_seconds: 15)`.
+2. If status is `answered` or `error` → show the user. Done.
+3. If status is `pending` → **immediately** call `check_reply` with `wait_seconds: 180` (up to 240). Do not ask permission.
+4. If still `pending` → call `check_reply` again with `wait_seconds: 180`. Repeat until `answered`, `error`, `unknown_ticket`, or ~10 minutes wall time.
+5. **Stay silent toward the user while polling.** No "still pending", no "want me to check?". Only speak when you have a final result, or when the budget is exhausted.
+
+If the user said something like "пришли ответ когда ответит" / "check until they answer" / "don't spam me", that means: silent loop above, one message when done.
+
+### Offline peers
+
+On `peer_offline`: tell the user once that the question is queued, give `ticket_id`. If they asked you to wait for the answer anyway, enter the same silent `check_reply` loop (longer gaps are fine). Do not re-`ask_peer`.
 
 ## Response statuses
 
 | status | fields | what it means | what to do |
 |---|---|---|---|
-| `answered` | `answer`, `ticket_id`, `conversation_id` | responder finished, answer inside `answer` | present it; keep `conversation_id` for follow-ups |
-| `error` | `error`, `ticket_id`, `conversation_id` | responder or relay produced an error (e.g. `"cursor-agent failed: ..."`, `"unknown peer: ..."`, `"expired"`, `"overflow"`) | show the error to the user, do not retry silently |
-| `pending` | `ticket_id`, `conversation_id` | ask timed out but the question is still in flight | wait, then `check_reply(ticket_id)`; the ticket lives 24h |
-| `peer_offline` | `ticket_id`, `conversation_id` | responder hasn't long-polled for over 60s | the question is queued (max 100 per peer); tell the user and give them the `ticket_id` so they can retrieve it later |
+| `answered` | `answer`, `ticket_id`, `conversation_id` | responder finished | present it; keep `conversation_id` for follow-ups |
+| `error` | `error`, `ticket_id`, `conversation_id` | responder or relay error | show the error, do not retry silently |
+| `pending` | `ticket_id`, `conversation_id` | still in flight (timeout, host abort, or peer slow) | silent `check_reply` with `wait_seconds` (see above). Ticket lives 24h |
+| `peer_offline` | `ticket_id`, `conversation_id` | responder hasn't long-polled for over 60s | question is queued; tell user once, or silent-poll if they asked to wait |
+| `unknown_ticket` | `ticket_id` | already consumed, expired, or relay restarted | stop. Tell the user the ticket is gone |
 
 ## `check_reply` semantics
 
-- Reads once. After a successful `answered` or `error` read, the ticket is consumed and future calls return `unknown_ticket`.
+- Optional `wait_seconds` (0–240). Default `0` = instant read. Prefer `180` when finishing a pending ask.
+- Reads once on `answered` / `error`. After that, future calls return `unknown_ticket`.
 - Save the answer before doing anything else.
-- 24-hour retention. After that, `unknown_ticket`.
-- Also returns `unknown_ticket` if the relay was restarted (in-memory storage).
+- 24-hour retention. Also `unknown_ticket` if the relay was restarted (in-memory storage).
 
 ## Remote actions through plain questions
 
@@ -52,11 +70,13 @@ There is no separate action tool. If the peer owner loosened restrictions (`douc
 - Do not paste large files or transcripts into the question. The responder has its own memory sources.
 - Do not chain multiple unrelated questions in one `ask_peer` call — one question per ticket. Use `conversation_id` for related follow-ups.
 - Do not retry `ask_peer` on `pending`. It creates a duplicate ticket. Use `check_reply` instead.
+- Do not ask the user whether to continue polling after `pending`. Just poll.
+- Do not narrate every pending poll to the user.
 - Do not assume the responder shares your policy view. It has its own `policy.md` and `restrictions`. If it refuses, generalises, or reports a permission deny, that is intentional.
 
 ## Costs
 
-The responding machine pays for its own `cursor-agent` tokens on every question. Don't ask idly.
+The responding machine pays for its own agent tokens on every question. Don't ask idly.
 
 ## Counter-questions from the responder
 
@@ -65,4 +85,4 @@ Since v2.1 the responder may fire back a clarifying question at you via `ask_pee
 - Keep your own transcripts and AGENTS.md in `~/.doucopy/config.json`, otherwise the counter-question will get a useless answer.
 - Depth is capped: `hops` can only be 0 (initial) or 1 (counter). No infinite ping-pong.
 - Each conversation is capped at 4 open tickets simultaneously (relay returns `too many open tickets` if you spam it).
-- The counter-question cycle eats into your `timeout_seconds` budget. If you set 120s and the counter-question itself waits 60s, you have 60s left for the final answer. Increase `timeout_seconds` to 240s if you expect a counter-question.
+- The counter-question cycle eats into your wait budget. Prefer finishing with `check_reply` `wait_seconds: 180–240` if you expect a counter-question.

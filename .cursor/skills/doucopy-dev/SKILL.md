@@ -36,11 +36,12 @@ daemon/               responder daemon
 
 cli/                  doucopy CLI (bin aliases: doucopy, agent-link)
   src/
-    index.ts          argv dispatcher
+    index.ts          argv dispatcher (TTY → Ink TUI, --yes / DOUCOPY_NO_TUI → plain)
+    tui/              Ink AppShell: header, tabs, Status/Settings/Peers/Chat/Setup/Invite/Ops
     api.ts            HTTP client for /join, /invite, /status
     setup.ts          discoverMemorySources, writeConfig, mergeMcpJson, writeDefaultPolicy
-    settings.ts       doucopy settings wizard (restrictions, model, persona, harness)
-    join.ts           end-to-end machine setup
+    settings.ts       settings helpers + legacy inquirer wizard (restrictions, model, persona, harness, keep_awake)
+    join.ts           end-to-end machine setup (+ finalizeJoin for TUI)
     invite.ts         invite (server-side or --secret bootstrap)
     status.ts         daemon + relay status
     launchd.ts        install / start / stop / detect the launchd daemon, legacy daemon teardown

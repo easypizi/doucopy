@@ -145,16 +145,19 @@ Skills installed during join (wizard step 4) tell the agent when to call `ask_pe
 ### From the terminal
 
 ```bash
-npx doucopy chat                      # interactive REPL: colored peers table, /use <peer>, then type
-npx doucopy status                    # daemon, peers, dialogs, paused peers, coloured status
-npx doucopy settings                  # restrictions, filtering, harness-aware model, persona, harness
+npx doucopy                           # interactive TUI (Status header: peers, daemon, queues)
+npx doucopy chat                      # TUI Chat tab (or plain REPL if non-TTY)
+npx doucopy status                    # TUI Status (or one-shot dump if non-TTY)
+npx doucopy settings                  # TUI Settings: searchable switches, Esc discards
 npx doucopy policy                    # opens ~/.doucopy/policy.md in $EDITOR
-npx doucopy logs -f                   # tail the responder log
-npx doucopy pause work-mbp --for 2h   # refuse questions from a peer
+npx doucopy logs -f                   # tail the responder log (stream, not TUI)
+npx doucopy pause work-mbp --for 2h   # local mute: refuse their questions (does not stop their daemon)
 npx doucopy resume work-mbp
 npx doucopy start | stop | restart    # control the launchd daemon
 npx doucopy invite --ttl 48           # mint an invite from this machine
 ```
+
+On a TTY, bare `doucopy` and most interactive commands open one Ink shell (tabs: Status, Settings, Peers, Chat, Setup, Ops) with a live header. Use `--yes` or `DOUCOPY_NO_TUI=1` for the classic non-interactive CLI.
 
 Every command has a `make` alias for a repo checkout: `make chat`, `make status`, `make settings`, `make policy`, `make invite`, `make pause PEER=work-mbp FOR=2h`, and so on. Run `make` for the full list.
 

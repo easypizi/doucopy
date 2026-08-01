@@ -179,4 +179,64 @@ describe("MCP tools", () => {
     );
     expect(result).toMatchObject({ status: "answered", answer: "late", ticket_id });
   });
+
+  it("check_reply with wait_seconds long-polls until the ticket settles", async () => {
+    const mailbox = new Mailbox();
+    const { ticket_id } = mailbox.enqueue("work", "personal", "hi");
+    const client = await connect(mailbox, "personal");
+    const checking = client.callTool({
+      name: "check_reply",
+      arguments: { ticket_id, wait_seconds: 5 },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    mailbox.settle(ticket_id, { answer: "later" });
+    const result = payload(await checking);
+    expect(result).toMatchObject({ status: "answered", answer: "later", ticket_id });
+  });
+
+  it("check_reply with wait_seconds returns pending when the budget expires", async () => {
+    const mailbox = new Mailbox();
+    const { ticket_id } = mailbox.enqueue("work", "personal", "hi");
+    const client = await connect(mailbox, "personal");
+    const result = payload(
+      await client.callTool({
+        name: "check_reply",
+        arguments: { ticket_id, wait_seconds: 1 },
+      }),
+    );
+    expect(result).toMatchObject({ status: "pending", ticket_id });
+  });
+
+  it("check_reply with wait_seconds sends keepalive notifications", async () => {
+    const mailbox = new Mailbox();
+    const { ticket_id } = mailbox.enqueue("work", "personal", "hi");
+    const client = await connect(mailbox, "personal", { keepaliveIntervalMs: 20 });
+
+    const notifications: unknown[] = [];
+    let gotNotification!: () => void;
+    const notified = new Promise<void>((resolve) => {
+      gotNotification = resolve;
+    });
+    client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
+      notifications.push(notification);
+      gotNotification();
+    });
+
+    const checking = client.callTool({
+      name: "check_reply",
+      arguments: { ticket_id, wait_seconds: 5 },
+    });
+
+    await Promise.race([
+      notified,
+      new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error("keepalive notification not received within 2s")), 2000),
+      ),
+    ]);
+    expect(notifications.length).toBeGreaterThan(0);
+
+    mailbox.settle(ticket_id, { answer: "42" });
+    const result = payload(await checking);
+    expect(result.status).toBe("answered");
+  });
 });

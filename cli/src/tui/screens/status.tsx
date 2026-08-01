@@ -1,0 +1,123 @@
+import { Box, Text, useInput, useWindowSize } from "ink";
+import { Panel } from "../components/Panel.js";
+import { theme } from "../theme.js";
+import type { StatusSnapshot } from "../useStatusSnapshot.js";
+
+function statusColor(status: string): string {
+  if (status === "answered") return theme.ok;
+  if (status === "error" || status === "expired" || status === "overflow") return theme.err;
+  if (status === "pending") return theme.warn;
+  return theme.dim;
+}
+
+export function StatusScreen({
+  snap,
+  onRefresh,
+  onOpenPeers,
+  inputActive,
+}: {
+  snap: StatusSnapshot;
+  onRefresh: () => void;
+  onOpenPeers: () => void;
+  inputActive: boolean;
+}) {
+  const { columns } = useWindowSize();
+  const wide = columns >= 88;
+
+  useInput(
+    (input, key) => {
+      if (input === "r") onRefresh();
+      if (key.return) onOpenPeers();
+    },
+    { isActive: inputActive },
+  );
+
+  if (!snap.joined) {
+    return (
+      <Panel title="Status" flexGrow={1}>
+        <Box marginY={1} flexDirection="column">
+          <Text color={theme.warn}>No config yet.</Text>
+          <Text>Open the Setup tab (or run doucopy join) to connect.</Text>
+        </Box>
+      </Panel>
+    );
+  }
+
+  const peersPanel = (
+    <Panel title="Network" flexGrow={1}>
+      <Box marginTop={1} flexDirection="column">
+        {snap.peers.length === 0 ? (
+          <Text color={theme.dim}>(no peers yet)</Text>
+        ) : (
+          snap.peers.map((p) => (
+            <Box key={p.name}>
+              <Text color={p.online ? theme.ok : theme.dim}>{p.online ? "●" : "○"} </Text>
+              <Text bold={Boolean(p.self)}>{p.name.padEnd(18)}</Text>
+              {p.self ? <Text color={theme.accent}> you </Text> : <Text>{"     "}</Text>}
+              {p.paused ? (
+                <Text color={theme.warn}>paused</Text>
+              ) : (
+                <Text color={p.online ? theme.ok : theme.dim}>{p.online ? "online" : "offline"}</Text>
+              )}
+            </Box>
+          ))
+        )}
+      </Box>
+      {snap.paused.length > 0 ? (
+        <Box marginTop={1} flexDirection="column">
+          <Text color={theme.warn} bold>
+            Paused
+          </Text>
+          {snap.paused.map((p) => (
+            <Text key={p.peer} color={theme.dim}>
+              {"  "}
+              {p.peer} · {p.until_ms === null ? "indefinitely" : `until ${new Date(p.until_ms).toISOString()}`}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
+    </Panel>
+  );
+
+  const dialogsPanel = (
+    <Panel title="Activity" flexGrow={1}>
+      <Box marginTop={1} flexDirection="column">
+        <Text>
+          <Text color={theme.dim}>incoming queued  </Text>
+          <Text color={(snap.status?.incoming_queued ?? 0) > 0 ? theme.warn : theme.highlight} bold>
+            {snap.status?.incoming_queued ?? 0}
+          </Text>
+        </Text>
+        <Box marginTop={1} flexDirection="column">
+          <Text color={theme.dim}>open dialogs</Text>
+          {!snap.status || snap.status.outgoing.length === 0 ? (
+            <Text color={theme.dim}>  (none)</Text>
+          ) : (
+            snap.status.outgoing.map((t) => (
+              <Box key={t.ticket_id}>
+                <Text color={theme.dim}>  → </Text>
+                <Text>{t.to_peer.padEnd(16)} </Text>
+                <Text color={statusColor(t.status)}>{t.status}</Text>
+                <Text color={theme.dim}>  {t.ticket_id.slice(0, 8)}</Text>
+              </Box>
+            ))
+          )}
+        </Box>
+      </Box>
+    </Panel>
+  );
+
+  return (
+    <Box flexDirection="column" flexGrow={1}>
+      <Box flexDirection={wide ? "row" : "column"} flexGrow={1}>
+        <Box flexGrow={1} marginRight={wide ? 1 : 0} marginBottom={wide ? 0 : 1}>
+          {peersPanel}
+        </Box>
+        <Box flexGrow={1}>{dialogsPanel}</Box>
+      </Box>
+      <Box marginTop={1} flexShrink={0}>
+        <Text color={theme.dim}>c chat · r refresh · Enter Peers · Tab switch</Text>
+      </Box>
+    </Box>
+  );
+}
