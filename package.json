@@ -33,8 +33,8 @@
     "cli"
   ],
   "bin": {
-    "agent-link": "cli/dist/index.js",
-    "doucopy": "cli/dist/index.js"
+    "doucopy": "cli/dist/index.js",
+    "agent-link": "cli/dist/index.js"
   },
   "files": [
     "cli/dist",
