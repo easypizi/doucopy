@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { expandHome, loadConfig } from "../src/config.js";
+import { expandHome, loadConfig, resolveKeepAwake } from "../src/config.js";
 
 const VALID = {
   relay_url: "https://example.com",
@@ -205,5 +205,29 @@ describe("loadConfig", () => {
       }),
     );
     expect(() => loadConfig(file)).toThrow(/transcripts_glob/);
+  });
+
+  it("accepts keep_awake and rejects bad confirm_days", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-"));
+    const file = path.join(dir, "config.json");
+    writeFileSync(
+      file,
+      JSON.stringify({
+        ...VALID,
+        keep_awake: { enabled: true, confirm_days: 7, confirm_grace_hours: 12 },
+      }),
+    );
+    const config = loadConfig(file);
+    expect(resolveKeepAwake(config.keep_awake)).toEqual({
+      enabled: true,
+      confirm_days: 7,
+      confirm_grace_hours: 12,
+    });
+
+    writeFileSync(
+      file,
+      JSON.stringify({ ...VALID, keep_awake: { confirm_days: -1 } }),
+    );
+    expect(() => loadConfig(file)).toThrow(/confirm_days/);
   });
 });

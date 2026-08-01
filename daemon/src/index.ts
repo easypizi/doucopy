@@ -1,7 +1,8 @@
 import { homedir } from "node:os";
-import { expandHome, loadConfig } from "./config.js";
+import { expandHome, loadConfig, resolveKeepAwake } from "./config.js";
 import { ConversationStore } from "./conversations.js";
 import { createHandler } from "./handler.js";
+import { startKeepAwakeSupervisor } from "./keepAwake.js";
 import { migrateLegacyHome } from "./migrate.js";
 import { Poller } from "./poller.js";
 import { pruneWorkspaces } from "./workspace.js";
@@ -31,7 +32,11 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
 
-  console.log(`doucopy responder started as peer "${config.self_peer}"`);
+  const keepAwake = resolveKeepAwake(config.keep_awake);
+  console.log(
+    `doucopy responder started as peer "${config.self_peer}" (keep_awake=${keepAwake.enabled})`,
+  );
+  startKeepAwakeSupervisor(config, controller.signal);
   await poller.run(controller.signal);
 }
 

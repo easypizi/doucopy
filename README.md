@@ -220,6 +220,7 @@ doucopy assumes a **trusted circle** of invited peers and an **untrusted questio
 
 - **Responder daemon is macOS-only** (`launchd`). Linux machines can join as askers.
 - **Stopped daemon = no live answers.** A valid token still authenticates to the relay, but nothing runs the harness until the daemon long-polls again. Questions may queue (`peer_offline`) for up to 24h.
+- **Keep awake (default on).** While the responder daemon runs, launchd wraps it in `caffeinate` so the Mac does not idle-sleep and peers can still reach you. Every 3 days (configurable) macOS asks whether to keep it. Decline or ignore past the grace window stops the daemon. Configure via `npx doucopy settings` → Keep awake, or `keep_awake` in `~/.doucopy/config.json`. True power-off still means offline.
 - **Relay restart drops in-flight questions.** All relay state (open tickets, presence) lives in memory. Queued questions survive for 24h only while the relay is up.
 - **No horizontal scaling.** One relay instance by design. Fine for a personal circle, not for a SaaS.
 - **Cursor write lockdown is permissions-based**, not a full OS sandbox. Default deny targets common home folders. Prove with the live smoke in `docs/PUBLISH_CHECKLIST.md` before trusting a release.

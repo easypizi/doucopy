@@ -107,6 +107,11 @@ export function defaultConfig(
       shell: { mode: "off", deny: [] },
     },
     redact: { literals: [], patterns: [] },
+    keep_awake: {
+      enabled: true,
+      confirm_days: 3,
+      confirm_grace_hours: 24,
+    },
   };
 }
 

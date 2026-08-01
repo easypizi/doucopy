@@ -5,8 +5,7 @@
   <key>Label</key><string>com.doucopy.responder</string>
   <key>ProgramArguments</key>
   <array>
-    <string>__NODE__</string>
-    <string>__REPO__/daemon/dist/index.js</string>
+__PROGRAM_ARGUMENTS__
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

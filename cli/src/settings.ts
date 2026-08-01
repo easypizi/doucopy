@@ -37,7 +37,50 @@ export interface DoucopyConfigFile {
     shell?: { mode?: ShellMode; deny?: string[] };
   };
   redact?: { literals?: string[]; patterns?: string[] };
+  keep_awake?: {
+    enabled?: boolean;
+    confirm_days?: number;
+    confirm_grace_hours?: number;
+  };
   [key: string]: unknown;
+}
+
+export interface KeepAwakeSettings {
+  enabled: boolean;
+  confirm_days: number;
+  confirm_grace_hours: number;
+}
+
+export const DEFAULT_KEEP_AWAKE_SETTINGS: KeepAwakeSettings = {
+  enabled: true,
+  confirm_days: 3,
+  confirm_grace_hours: 24,
+};
+
+export function keepAwakeFromConfig(config: DoucopyConfigFile): KeepAwakeSettings {
+  return {
+    enabled: config.keep_awake?.enabled ?? DEFAULT_KEEP_AWAKE_SETTINGS.enabled,
+    confirm_days: config.keep_awake?.confirm_days ?? DEFAULT_KEEP_AWAKE_SETTINGS.confirm_days,
+    confirm_grace_hours:
+      config.keep_awake?.confirm_grace_hours ?? DEFAULT_KEEP_AWAKE_SETTINGS.confirm_grace_hours,
+  };
+}
+
+export function applyKeepAwake(config: DoucopyConfigFile, keepAwake: KeepAwakeSettings): DoucopyConfigFile {
+  return {
+    ...config,
+    keep_awake: {
+      enabled: keepAwake.enabled,
+      confirm_days: keepAwake.confirm_days,
+      confirm_grace_hours: keepAwake.confirm_grace_hours,
+    },
+  };
+}
+
+export function summarizeKeepAwake(k: KeepAwakeSettings): string {
+  if (!k.enabled) return "off (Mac may idle-sleep)";
+  if (k.confirm_days <= 0) return "on, no periodic confirm";
+  return `on, confirm every ${k.confirm_days}d (grace ${k.confirm_grace_hours}h)`;
 }
 
 export const SAFE_RESTRICTIONS: RestrictionsSettings = {
@@ -447,14 +490,24 @@ export async function runSettings(home: string = homedir()): Promise<void> {
 
   let dirty = false;
   let section: string | undefined = "menu";
-  while (section === "menu" || section === "restrictions" || section === "filtering" || section === "model" || section === "persona" || section === "harness") {
+  while (
+    section === "menu"
+    || section === "restrictions"
+    || section === "filtering"
+    || section === "model"
+    || section === "persona"
+    || section === "harness"
+    || section === "keep_awake"
+  ) {
     const restrictions = restrictionsFromConfig(config);
+    const keepAwake = keepAwakeFromConfig(config);
     console.log("");
     console.log(`Peer: ${config.self_peer ?? "?"} @ ${config.relay_url ?? "?"}`);
     console.log(`Restrictions: ${summarizeRestrictions(restrictions)}`);
     console.log(`Model: ${config.responder?.model ?? "(harness default)"}`);
     console.log(`Persona: ${config.responder?.persona?.trim() ? config.responder.persona : "(none)"}`);
     console.log(`Harness: ${config.responder?.harness ?? "cursor-agent"}`);
+    console.log(`Keep awake: ${summarizeKeepAwake(keepAwake)}`);
     console.log(`Redact literals: ${(config.redact?.literals ?? []).join(", ") || "(none)"}`);
 
     section = await select({
@@ -465,6 +518,7 @@ export async function runSettings(home: string = homedir()): Promise<void> {
         { value: "model", name: "Model" },
         { value: "persona", name: "Persona (response style)" },
         { value: "harness", name: "Harness" },
+        { value: "keep_awake", name: "Keep awake (prevent sleep while answering)" },
         { value: "done", name: "Save and finish" },
       ],
     });
@@ -521,6 +575,43 @@ export async function runSettings(home: string = homedir()): Promise<void> {
         const model = await pickModel(undefined, harness);
         config = applyResponderField(config, "model", model);
       }
+      dirty = true;
+      section = "menu";
+      continue;
+    }
+    if (section === "keep_awake") {
+      const current = keepAwakeFromConfig(config);
+      const enabled = await confirm({
+        message: "Prevent idle sleep while the responder daemon runs?",
+        default: current.enabled,
+      });
+      let confirm_days = 0;
+      let confirm_grace_hours = current.confirm_grace_hours;
+      if (enabled) {
+        const daysRaw = await input({
+          message: "Ask every N days whether to keep it (0 = never ask)",
+          default: String(current.confirm_days),
+          validate: (v) => {
+            const n = Number(v);
+            if (!Number.isInteger(n) || n < 0) return "enter a non-negative integer";
+            return true;
+          },
+        });
+        confirm_days = Number(daysRaw);
+        if (confirm_days > 0) {
+          const graceRaw = await input({
+            message: "Hours to wait for an answer before stopping the daemon",
+            default: String(current.confirm_grace_hours),
+            validate: (v) => {
+              const n = Number(v);
+              if (!Number.isFinite(n) || n <= 0) return "enter a positive number";
+              return true;
+            },
+          });
+          confirm_grace_hours = Number(graceRaw);
+        }
+      }
+      config = applyKeepAwake(config, { enabled, confirm_days, confirm_grace_hours });
       dirty = true;
       section = "menu";
       continue;

@@ -37,6 +37,27 @@ export const DEFAULT_RESTRICTIONS: ResolvedRestrictions = {
   shell: { mode: "off", deny: [] },
 };
 
+export interface KeepAwakeConfig {
+  /** Prevent idle sleep while the responder daemon runs (via caffeinate). Default true. */
+  enabled?: boolean;
+  /** Ask every N days whether to keep the daemon. 0 = never ask. Default 3. */
+  confirm_days?: number;
+  /** Hours to wait for a confirm answer before stopping the daemon. Default 24. */
+  confirm_grace_hours?: number;
+}
+
+export interface ResolvedKeepAwake {
+  enabled: boolean;
+  confirm_days: number;
+  confirm_grace_hours: number;
+}
+
+export const DEFAULT_KEEP_AWAKE: ResolvedKeepAwake = {
+  enabled: true,
+  confirm_days: 3,
+  confirm_grace_hours: 24,
+};
+
 export interface DaemonConfig {
   relay_url: string;
   self_peer: string;
@@ -60,6 +81,7 @@ export interface DaemonConfig {
   };
   restrictions?: RestrictionsConfig;
   redact?: Partial<RedactConfig>;
+  keep_awake?: KeepAwakeConfig;
 }
 
 /** Normalize transcripts_glob to a non-empty string array (after expandHome). */
@@ -111,6 +133,40 @@ export function resolveRestrictions(raw?: RestrictionsConfig): ResolvedRestricti
       deny: [...(raw.shell?.deny ?? [])],
     },
   };
+}
+
+export function resolveKeepAwake(raw?: KeepAwakeConfig): ResolvedKeepAwake {
+  return {
+    enabled: raw?.enabled ?? DEFAULT_KEEP_AWAKE.enabled,
+    confirm_days: raw?.confirm_days ?? DEFAULT_KEEP_AWAKE.confirm_days,
+    confirm_grace_hours: raw?.confirm_grace_hours ?? DEFAULT_KEEP_AWAKE.confirm_grace_hours,
+  };
+}
+
+function validateKeepAwake(raw: unknown): KeepAwakeConfig | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "object" || raw === null) {
+    throw new Error("config: keep_awake must be an object");
+  }
+  const k = raw as KeepAwakeConfig;
+  if (k.enabled !== undefined && typeof k.enabled !== "boolean") {
+    throw new Error("config: keep_awake.enabled must be a boolean");
+  }
+  if (k.confirm_days !== undefined) {
+    if (typeof k.confirm_days !== "number" || !Number.isInteger(k.confirm_days) || k.confirm_days < 0) {
+      throw new Error("config: keep_awake.confirm_days must be a non-negative integer");
+    }
+  }
+  if (k.confirm_grace_hours !== undefined) {
+    if (
+      typeof k.confirm_grace_hours !== "number"
+      || !Number.isFinite(k.confirm_grace_hours)
+      || k.confirm_grace_hours <= 0
+    ) {
+      throw new Error("config: keep_awake.confirm_grace_hours must be a positive number");
+    }
+  }
+  return k;
 }
 
 function assertStringArray(value: unknown, label: string): asserts value is string[] {
@@ -215,6 +271,7 @@ export function loadConfig(filePath = "~/.doucopy/config.json"): DaemonConfig {
     throw new Error("config: responder.max_concurrent must be a positive integer");
   }
   config.restrictions = validateRestrictions(config.restrictions);
+  config.keep_awake = validateKeepAwake(config.keep_awake);
   if (config.redact !== undefined) {
     if (typeof config.redact !== "object" || config.redact === null) {
       throw new Error("config: redact must be an object");

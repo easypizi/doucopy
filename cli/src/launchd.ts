@@ -15,14 +15,45 @@ export function plistDestination(home: string): string {
   return path.join(home, "Library/LaunchAgents", `${LABEL}.plist`);
 }
 
-export function renderPlist(nodeBin: string, repoRoot: string, home: string): string {
+function plistStringArg(value: string): string {
+  return `    <string>${value.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</string>`;
+}
+
+/** Read keep_awake.enabled from config.json. Missing/invalid → true (safe default). */
+export function readKeepAwakeEnabled(home: string): boolean {
+  const file = path.join(home, ".doucopy/config.json");
+  if (!existsSync(file)) return true;
+  try {
+    const raw = JSON.parse(readFileSync(file, "utf8")) as {
+      keep_awake?: { enabled?: boolean };
+    };
+    if (raw.keep_awake?.enabled === undefined) return true;
+    return Boolean(raw.keep_awake.enabled);
+  } catch {
+    return true;
+  }
+}
+
+export function programArgumentsXml(nodeBin: string, repoRoot: string, keepAwake: boolean): string {
+  const daemonEntry = path.join(repoRoot, "daemon/dist/index.js");
+  const args = keepAwake
+    ? ["/usr/bin/caffeinate", "-dims", nodeBin, daemonEntry]
+    : [nodeBin, daemonEntry];
+  return args.map(plistStringArg).join("\n");
+}
+
+export function renderPlist(
+  nodeBin: string,
+  repoRoot: string,
+  home: string,
+  keepAwake = true,
+): string {
   const template = readFileSync(
     path.join(repoRoot, "daemon/launchd", `${LABEL}.plist`),
     "utf8",
   );
   return template
-    .replaceAll("__NODE__", nodeBin)
-    .replaceAll("__REPO__", repoRoot)
+    .replaceAll("__PROGRAM_ARGUMENTS__", programArgumentsXml(nodeBin, repoRoot, keepAwake))
     .replaceAll("__HOME__", home);
 }
 
@@ -46,20 +77,26 @@ export function installDaemon(home: string): void {
   }
   teardownLegacyDaemon(home);
   mkdirSync(path.join(home, ".doucopy/workspace"), { recursive: true });
-  chmodSync(path.join(home, ".doucopy/config.json"), 0o600);
+  const configPath = path.join(home, ".doucopy/config.json");
+  if (existsSync(configPath)) chmodSync(configPath, 0o600);
+  const keepAwake = readKeepAwakeEnabled(home);
   const dst = plistDestination(home);
   mkdirSync(path.dirname(dst), { recursive: true });
-  writeFileSync(dst, renderPlist(process.execPath, root, home));
+  writeFileSync(dst, renderPlist(process.execPath, root, home, keepAwake));
   spawnSync("launchctl", ["unload", dst], { stdio: "ignore" });
+  spawnSync("launchctl", ["bootout", `gui/${process.getuid?.() ?? 0}/${LABEL}`], { stdio: "ignore" });
   execFileSync("launchctl", ["load", dst]);
 }
 
 export function startDaemon(home: string): void {
-  execFileSync("launchctl", ["load", plistDestination(home)]);
+  // Re-render plist so keep_awake changes take effect.
+  installDaemon(home);
 }
 
 export function stopDaemon(home: string): void {
-  spawnSync("launchctl", ["unload", plistDestination(home)], { stdio: "ignore" });
+  const dst = plistDestination(home);
+  spawnSync("launchctl", ["unload", dst], { stdio: "ignore" });
+  spawnSync("launchctl", ["bootout", `gui/${process.getuid?.() ?? 0}/${LABEL}`], { stdio: "ignore" });
 }
 
 export function isDaemonRunning(): boolean {
