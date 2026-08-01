@@ -24,6 +24,8 @@ export async function launchTui(opts: LaunchOptions = {}): Promise<void> {
       // restore the previous terminal contents on exit.
       alternateScreen: true,
       interactive: true,
+      // App handles double Ctrl+C (and double q) itself.
+      exitOnCtrlC: false,
     },
   );
   await instance.waitUntilExit();

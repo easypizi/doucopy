@@ -325,6 +325,17 @@ describe("App shell", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("Settings");
   });
+
+  it("requires Ctrl+C twice to quit", async () => {
+    const home = writeConfigHome();
+    const { lastFrame, stdin, unmount } = render(<App home={home} initialScreen="status" />);
+    cleanups.push(unmount);
+    await new Promise((r) => setTimeout(r, 60));
+    stdin.write("\x03"); // first Ctrl+C
+    await new Promise((r) => setTimeout(r, 80));
+    expect(lastFrame()).toContain("Press Ctrl+C again to quit");
+    // Still mounted: second press would exit. We only assert the confirm hint.
+  });
 });
 
 describe("SelectModal back", () => {

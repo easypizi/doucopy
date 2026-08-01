@@ -116,7 +116,7 @@ export function PeersScreen({
     return (
       <Box flexDirection="column">
         <Text color={theme.warn}>Join first to manage peers.</Text>
-        <FooterHints hints="Tab switch · q quit" />
+        <FooterHints hints="Tab switch · Ctrl+C twice to quit" />
       </Box>
     );
   }

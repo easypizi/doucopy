@@ -303,7 +303,7 @@ export function SettingsScreen({
     return (
       <Box flexDirection="column">
         <Text color={theme.warn}>No config. Join first (Setup tab).</Text>
-        <FooterHints hints="Tab switch · q quit" />
+        <FooterHints hints="Tab switch · Ctrl+C twice to quit" />
       </Box>
     );
   }

@@ -1,6 +1,6 @@
 {
   "name": "doucopy",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "Connect AI agents from different accounts (or a small trusted circle) so one can ask the other questions answered from its own memory. CLI, MCP, terminal REPL.",
   "license": "FSL-1.1-MIT",
   "type": "module",

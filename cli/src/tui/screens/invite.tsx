@@ -173,7 +173,7 @@ export function InviteScreen({ home, inputActive }: { home: string; inputActive:
       </Text>
       <Text>Mint a join code for a new machine.</Text>
       {busy ? <Text color={theme.warn}>working…</Text> : null}
-      <FooterHints hints="Enter start · Esc/Tab leave · q quit" />
+      <FooterHints hints="Enter start · Esc/Tab leave · Ctrl+C twice to quit" />
     </Box>
   );
 }

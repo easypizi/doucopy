@@ -1,5 +1,5 @@
-import { Box, useApp, useInput, useWindowSize } from "ink";
-import { useState } from "react";
+import { Box, Text, useApp, useInput, useWindowSize } from "ink";
+import { useEffect, useRef, useState } from "react";
 import { FooterHints } from "./components/FooterHints.js";
 import { Panel } from "./components/Panel.js";
 import { TabBar } from "./components/TabBar.js";
@@ -11,8 +11,12 @@ import { PeersScreen } from "./screens/peers.js";
 import { SettingsScreen } from "./screens/settings.js";
 import { SetupScreen } from "./screens/setup.js";
 import { StatusScreen } from "./screens/status.js";
+import { theme } from "./theme.js";
 import { SCREENS, type LaunchOptions, type ScreenId } from "./types.js";
 import { useStatusSnapshot } from "./useStatusSnapshot.js";
+
+/** Second Ctrl+C / q within this window exits. */
+export const QUIT_CONFIRM_MS = 2000;
 
 export function App({
   home,
@@ -31,14 +35,36 @@ export function App({
   const rows = Math.max(win.rows || 0, 20);
   const [screen, setScreen] = useState<ScreenId>(initialScreen);
   const [chatBusy, setChatBusy] = useState(false);
+  const [quitHint, setQuitHint] = useState(false);
+  const lastQuitAt = useRef(0);
   const snap = useStatusSnapshot(home);
 
   const screenIndex = SCREENS.indexOf(screen);
   const wrapScreens = screen !== "status";
 
-  useInput((input, key) => {
-    if (input === "q" && screen !== "chat") {
+  useEffect(() => {
+    if (!quitHint) return;
+    const t = setTimeout(() => setQuitHint(false), QUIT_CONFIRM_MS);
+    return () => clearTimeout(t);
+  }, [quitHint]);
+
+  const requestQuit = () => {
+    const now = Date.now();
+    if (now - lastQuitAt.current <= QUIT_CONFIRM_MS) {
       exit();
+      return;
+    }
+    lastQuitAt.current = now;
+    setQuitHint(true);
+  };
+
+  useInput((input, key) => {
+    if (key.ctrl && input === "c") {
+      requestQuit();
+      return;
+    }
+    if (input === "q" && screen !== "chat") {
+      requestQuit();
       return;
     }
     // Quick jump to Chat from browse screens (not while typing in Settings/Setup).
@@ -74,6 +100,10 @@ export function App({
     </>
   );
 
+  const baseHints = chatBusy
+    ? "replies pending — keep typing in Chat · Tab switch · Ctrl+C twice to quit"
+    : "Tab / Shift+Tab switch · Ctrl+C twice to quit";
+
   return (
     <Box flexDirection="column" width={columns} height={rows} paddingX={1} paddingY={0}>
       <Box flexShrink={0}>
@@ -89,14 +119,13 @@ export function App({
           body
         )}
       </Box>
-      <Box flexShrink={0}>
-        <FooterHints
-          hints={
-            chatBusy
-              ? "replies pending — keep typing in Chat · Tab switch · q quit"
-              : "Tab / Shift+Tab switch · q quit"
-          }
-        />
+      <Box flexShrink={0} flexDirection="column">
+        {quitHint ? (
+          <Text color={theme.warn} bold>
+            Press Ctrl+C again to quit
+          </Text>
+        ) : null}
+        <FooterHints hints={baseHints} />
       </Box>
     </Box>
   );

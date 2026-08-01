@@ -621,7 +621,7 @@ export function SetupScreen({
         {[...log, ...phase.messages].map((m, i) => (
           <Text key={i}>{m}</Text>
         ))}
-        <FooterHints hints="Tab to Status · q quit" />
+        <FooterHints hints="Tab to Status · Ctrl+C twice to quit" />
       </Box>
     );
   }

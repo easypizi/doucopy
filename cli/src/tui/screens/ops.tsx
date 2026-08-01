@@ -135,7 +135,7 @@ export function OpsScreen({ inputActive }: { inputActive: boolean }) {
         onCancel={() => undefined}
         onSelect={(op) => setStep({ kind: "app", op })}
       />
-      <FooterHints hints="Esc does nothing here · Tab to leave · q quit" />
+      <FooterHints hints="Esc does nothing here · Tab to leave · Ctrl+C twice to quit" />
     </Box>
   );
 }
