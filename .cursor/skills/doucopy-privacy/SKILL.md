@@ -10,7 +10,7 @@ description: "Use when tightening what the responder is allowed to reveal or do,
 **Hard tool lockdown (deterministic).** Before each run the daemon writes harness-native permissions (`daemon/src/permissions.ts`). Cursor gets `<workspace>/.cursor/cli.json`, Claude gets `--permission-mode dontAsk` plus `--settings`, Codex gets the nearest `--sandbox`. Deny wins. Configure via `doucopy settings` or the `restrictions` object in `~/.doucopy/config.json`.
 
 - `restrictions.fs_write`: `workspace_only` (default) or `custom` with extra `allow` folders.
-- `restrictions.fs_read.deny`: extra read-blocked paths. `~/.ssh`, `~/.aws`, `~/.doucopy` are always denied.
+- `restrictions.fs_read.deny`: extra read-blocked paths. `~/.ssh`, `~/.aws`, and `~/.doucopy` secrets/sibling workspaces are always denied (not a blanket `~/.doucopy/**`).
 - `restrictions.shell`: `off` (default), `deny_patterns`, or `open`.
 - Missing `restrictions` means the safe default (workspace writes only, shell off).
 
@@ -46,10 +46,13 @@ doucopy restart    # daemon re-reads config.json (policy.md Never reveal applies
 ## Verify
 
 - Unit coverage: `daemon/test/permissions.test.ts`, `daemon/test/redact.test.ts`.
-- Red-team with `ask_peer` probes in [references/red-team.md](references/red-team.md).
+- Live Cursor smoke: `make live-smoke-cursor` (default deny Desktop write, then custom allow).
+- Red-team battery (side-effect + exfil + prompt-injection): [references/red-team.md](references/red-team.md). Mark pass/fail in [docs/PUBLISH_CHECKLIST.md](../../../docs/PUBLISH_CHECKLIST.md) before publish.
+- Threat model: trusted circle, untrusted question. See root `CONTEXT.md` and `docs/adr/0001-trusted-circle-untrusted-question.md`.
 
 ## Common mistakes
 
 - Trusting `policy.md` alone for hard secrets or tool bans.
 - Expecting Codex to honour a Desktop write allow the same way Cursor does.
 - Forgetting `doucopy restart` after editing `restrictions` or `responder.model` / `persona`.
+- Publishing without a green PUBLISH_CHECKLIST (bar C).

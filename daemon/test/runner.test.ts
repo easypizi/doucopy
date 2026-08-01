@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,7 +68,9 @@ describe("runTask", () => {
     expect(result).toEqual({ answer: "STUB ANSWER" });
     expect(readFileSync(path.join(opts.workspaceDir, "task.md"), "utf8")).toBe("# task body");
     const args = readFileSync(opts.logFile, "utf8").trimEnd().split("\n");
-    expect(args).toEqual([
+    // macOS often resolves tmpdir through /private; compare real paths.
+    expect(args[0]).toBe(`cwd=${realpathSync(opts.workspaceDir)}`);
+    expect(args.slice(1)).toEqual([
       "--resume",
       "chat-123",
       "-p",

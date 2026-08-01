@@ -40,15 +40,20 @@ describe("buildPermissions", () => {
     expect(perms.summary.shell).toBe("off");
   });
 
-  it("always includes built-in read denials", () => {
+  it("always includes built-in read denials without blanketing the active workspace", () => {
     const workspace = path.join(homedir(), ".doucopy/workspace/conv1");
     const perms = buildPermissions(baseConfig(), workspace);
     const ssh = path.join(homedir(), ".ssh");
     const aws = path.join(homedir(), ".aws");
-    const doucopy = path.join(homedir(), ".doucopy");
-    expect(perms.readDeny).toEqual(expect.arrayContaining([ssh, aws, doucopy]));
+    const configJson = path.join(homedir(), ".doucopy/config.json");
+    expect(perms.readDeny).toEqual(expect.arrayContaining([ssh, aws, configJson]));
+    expect(perms.readDeny).not.toContain(path.join(homedir(), ".doucopy"));
+    expect(perms.readDeny).not.toContain(workspace);
     expect(perms.cursor.permissions.deny.some((d) => d.includes(".ssh"))).toBe(true);
     expect(perms.claude.permissions.deny.some((d) => d.includes(".ssh"))).toBe(true);
+    expect(perms.cursor.permissions.allow).toEqual(
+      expect.arrayContaining([`Read(${workspace})`, `Read(${workspace}/**)`]),
+    );
   });
 
   it("denies Desktop writes by default and allows them when listed", () => {

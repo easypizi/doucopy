@@ -162,7 +162,7 @@ Every command has a `make` alias for a repo checkout: `make chat`, `make status`
 
 Three layers on every answering machine:
 
-1. **Harness permissions** (default: write only inside the responder workspace, shell off). Built-in read denials always include `~/.ssh`, `~/.aws`, `~/.doucopy`. Edit with `npx doucopy settings` (or `make settings` from a checkout). Model presets follow the chosen harness (Cursor / Claude Code / Codex).
+1. **Harness permissions** (default: write only inside the responder workspace, shell off). Built-in read denials always include `~/.ssh`, `~/.aws`, plus `~/.doucopy` secrets and sibling workspaces (the active workspace stays readable). Edit with `npx doucopy settings` (or `make settings` from a checkout). Model presets follow the chosen harness (Cursor / Claude Code / Codex).
 2. **`policy.md`** soft instructions for topics and tone.
 3. **`## Never reveal` / redact** hard post-filter on every outgoing answer.
 
@@ -212,9 +212,18 @@ doucopy is built for a small circle of trusted machines, tens rather than thousa
 
 ## Caveats
 
+### Threat model
+
+doucopy assumes a **trusted circle** of invited peers and an **untrusted question**. Anyone with a valid peer token can ask your responder. Controls on the answering machine (restrictions, `policy.md`, redact, invite/revoke) limit damage from a compromised asker. We do **not** promise isolation against a malicious peer that already holds a valid token. See [docs/adr/0001-trusted-circle-untrusted-question.md](docs/adr/0001-trusted-circle-untrusted-question.md) and [CONTEXT.md](CONTEXT.md).
+
+### Operational limits
+
 - **Responder daemon is macOS-only** (`launchd`). Linux machines can join as askers.
+- **Stopped daemon = no live answers.** A valid token still authenticates to the relay, but nothing runs the harness until the daemon long-polls again. Questions may queue (`peer_offline`) for up to 24h.
 - **Relay restart drops in-flight questions.** All relay state (open tickets, presence) lives in memory. Queued questions survive for 24h only while the relay is up.
 - **No horizontal scaling.** One relay instance by design. Fine for a personal circle, not for a SaaS.
+- **Cursor write lockdown is permissions-based**, not a full OS sandbox. Default deny targets common home folders. Prove with the live smoke in `docs/PUBLISH_CHECKLIST.md` before trusting a release.
+- **Codex sandbox is coarse** (`--sandbox` modes only). Per-path write allows and shell deny patterns are approximate there.
 - **Old npm versions stay MIT.** Versions published before the license change remain under their original license.
 
 ## Troubleshooting

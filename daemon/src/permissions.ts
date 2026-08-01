@@ -7,6 +7,7 @@ import {
   type RestrictionsConfig,
   type ResolvedRestrictions,
   BUILTIN_READ_DENY,
+  DOUCOPY_HOME,
   DEFAULT_RESTRICTIONS,
   resolveRestrictions,
 } from "./config.js";
@@ -48,14 +49,15 @@ function asGlobRoot(absPath: string): string {
   return normalized.endsWith(path.sep) ? normalized.slice(0, -1) : normalized;
 }
 
-function cursorReadToken(absPath: string): string {
+// Emit file + directory forms. Cursor matches files without /** and dirs with it.
+function cursorReadTokens(absPath: string): string[] {
   const root = asGlobRoot(absPath);
-  return `Read(${root}/**)`;
+  return [`Read(${root})`, `Read(${root}/**)`];
 }
 
-function cursorWriteToken(absPath: string): string {
+function cursorWriteTokens(absPath: string): string[] {
   const root = asGlobRoot(absPath);
-  return `Write(${root}/**)`;
+  return [`Write(${root})`, `Write(${root}/**)`];
 }
 
 /** Claude absolute on-disk paths use a // prefix. */
@@ -110,12 +112,56 @@ function writeRootsFor(config: DaemonConfig, workspaceDir: string, restrictions:
   return roots;
 }
 
-function readDenyPaths(restrictions: ResolvedRestrictions): string[] {
+/**
+ * Deny doucopy secrets and sibling conversation workspaces, but never the
+ * active workspace itself (deny would win over workspace Read allow).
+ */
+function doucopySideDenies(workspaceDir: string): string[] {
+  const root = expandHome(DOUCOPY_HOME);
+  const current = asGlobRoot(workspaceDir);
+  const denies: string[] = [];
+  const push = (p: string) => {
+    const key = asGlobRoot(p);
+    if (key === current || isUnderRoot(current, key)) return;
+    if (denies.some((d) => d === key)) return;
+    denies.push(key);
+  };
+  for (const name of ["config.json", "policy.md", "token", "invite.json"]) {
+    push(path.join(root, name));
+  }
+  try {
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      const full = path.join(root, entry.name);
+      if (entry.name === "workspace") {
+        try {
+          for (const conv of readdirSync(full, { withFileTypes: true })) {
+            if (!conv.isDirectory() && !conv.isSymbolicLink()) continue;
+            push(path.join(full, conv.name));
+          }
+        } catch {
+          // workspace parent unreadable
+        }
+        continue;
+      }
+      push(full);
+    }
+  } catch {
+    // If ~/.doucopy is missing, still keep the known secret file denials above.
+  }
+  // If the active workspace is outside ~/.doucopy, lock the whole tree.
+  if (!isUnderRoot(current, root) && asGlobRoot(current) !== root) {
+    push(root);
+  }
+  return denies;
+}
+
+function readDenyPaths(restrictions: ResolvedRestrictions, workspaceDir: string): string[] {
   const fromBuiltin = BUILTIN_READ_DENY.map((p) => expandHome(p));
+  const fromDoucopy = doucopySideDenies(workspaceDir);
   const custom = restrictions.fs_read.deny.map((p) => expandHome(p));
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const p of [...fromBuiltin, ...custom]) {
+  for (const p of [...fromBuiltin, ...fromDoucopy, ...custom]) {
     const key = asGlobRoot(p);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -135,8 +181,7 @@ function commonOutsideWriteDenies(writeRoots: string[]): string[] {
   // Always deny writes into the built-in sensitive dirs (even if somehow covered).
   for (const p of BUILTIN_READ_DENY.map((x) => expandHome(x))) {
     if (rootsCover(p, writeRoots) && writeRoots.some((r) => isUnderRoot(r, p) && asGlobRoot(r) !== asGlobRoot(p))) {
-      // Allowed root lives under a sensitive parent (e.g. workspace under ~/.doucopy).
-      // Do not blanket-deny the parent. Deny sibling files via specific tokens later if needed.
+      // Allowed root lives under a sensitive parent. Skip blanket parent deny.
       continue;
     }
     if (!rootsCover(p, writeRoots)) denies.push(p);
@@ -184,40 +229,49 @@ function mapCodexSandbox(restrictions: ResolvedRestrictions, writeRoots: string[
 export function buildPermissions(config: DaemonConfig, workspaceDir: string): HarnessPermissions {
   const restrictions = resolveRestrictions(config.restrictions);
   const writeRoots = writeRootsFor(config, workspaceDir, restrictions);
-  const readDeny = readDenyPaths(restrictions);
+  const readDeny = readDenyPaths(restrictions, workspaceDir);
   const memoryAllows = memoryReadAllows(config);
   const outsideWriteDenies = commonOutsideWriteDenies(writeRoots);
+  // Same targeted doucopy paths: block writes to config / sibling workspaces.
+  const doucopyWriteDenies = doucopySideDenies(workspaceDir);
 
   const cursorAllow: string[] = [];
   const cursorDeny: string[] = [];
   const claudeAllow: string[] = ["Read"];
   const claudeDeny: string[] = [];
 
-  cursorAllow.push(cursorReadToken(workspaceDir));
-  for (const root of memoryAllows) cursorAllow.push(cursorReadToken(root));
+  const pushCursor = (list: string[], tokens: string[]) => {
+    for (const token of tokens) {
+      if (!list.includes(token)) list.push(token);
+    }
+  };
+
+  pushCursor(cursorAllow, cursorReadTokens(workspaceDir));
+  for (const root of memoryAllows) pushCursor(cursorAllow, cursorReadTokens(root));
   for (const root of writeRoots) {
-    cursorAllow.push(cursorWriteToken(root));
+    pushCursor(cursorAllow, cursorWriteTokens(root));
     claudeAllow.push(claudeEditToken(root));
     claudeAllow.push(claudeWriteToken(root));
   }
 
   for (const denied of readDeny) {
-    cursorDeny.push(cursorReadToken(denied));
+    pushCursor(cursorDeny, cursorReadTokens(denied));
     claudeDeny.push(claudeReadToken(denied));
   }
 
-  for (const denied of outsideWriteDenies) {
-    cursorDeny.push(cursorWriteToken(denied));
-    claudeDeny.push(claudeEditToken(denied));
-    claudeDeny.push(claudeWriteToken(denied));
+  for (const denied of [...outsideWriteDenies, ...doucopyWriteDenies]) {
+    pushCursor(cursorDeny, cursorWriteTokens(denied));
+    const tokenEdit = claudeEditToken(denied);
+    const tokenWrite = claudeWriteToken(denied);
+    if (!claudeDeny.includes(tokenEdit)) claudeDeny.push(tokenEdit);
+    if (!claudeDeny.includes(tokenWrite)) claudeDeny.push(tokenWrite);
   }
   // Also deny writes into every custom read-deny path (owner clearly wants that area locked down).
   for (const denied of restrictions.fs_read.deny.map((p) => expandHome(p))) {
     if (rootsCover(denied, writeRoots)) continue;
-    const tokenCursor = cursorWriteToken(denied);
+    pushCursor(cursorDeny, cursorWriteTokens(denied));
     const tokenEdit = claudeEditToken(denied);
     const tokenWrite = claudeWriteToken(denied);
-    if (!cursorDeny.includes(tokenCursor)) cursorDeny.push(tokenCursor);
     if (!claudeDeny.includes(tokenEdit)) claudeDeny.push(tokenEdit);
     if (!claudeDeny.includes(tokenWrite)) claudeDeny.push(tokenWrite);
   }

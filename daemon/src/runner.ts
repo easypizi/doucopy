@@ -39,9 +39,13 @@ export interface RunnerOptions {
 // first line ourselves and terminate the child once we have the id.
 export async function createChat(opts: RunnerOptions): Promise<string> {
   return new Promise<string>((resolve, reject) => {
+    // cwd must be the conversation workspace so project `.cursor/cli.json`
+    // permissions are loaded (Cursor resolves project config from cwd).
+    mkdirSync(opts.workspaceDir, { recursive: true });
     const proc = spawn(opts.binary, ["create-chat"], {
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
+      cwd: opts.workspaceDir,
     });
     let buffer = "";
     let settled = false;
@@ -95,9 +99,12 @@ export async function runTask(
   ];
   if (opts.model) args.push("--model", opts.model);
   return new Promise((resolve) => {
+    // Same cwd requirement as createChat: without it, deny rules in
+    // `<workspace>/.cursor/cli.json` are ignored and `--force` allows writes.
     const proc = spawn(opts.binary, args, {
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
+      cwd: opts.workspaceDir,
     });
     let stdout = "";
     let stderr = "";

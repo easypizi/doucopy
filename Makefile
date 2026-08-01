@@ -15,7 +15,7 @@ CLI := node cli/dist/index.js
 
 .PHONY: help install build typecheck test test-watch clean relay \
         join setup policy settings invite chat status logs start stop restart pause resume \
-        deploy rotate-secret revoke unrevoke invite-bootstrap health publish
+        deploy rotate-secret revoke unrevoke invite-bootstrap health publish live-smoke-cursor
 
 ## User-facing (##U) and maintainer (##M) markers keep two sections tidy.
 help: ## Show this help
@@ -99,8 +99,17 @@ relay: build ##M Run the relay locally (needs RELAY_SECRET)
 	@test -n "$(RELAY_SECRET)" || { echo "RELAY_SECRET is required" >&2; exit 2; }
 	PORT=$(PORT) RELAY_SECRET=$(RELAY_SECRET) $(CLI) relay
 
-publish: build ##M Publish doucopy to npm (runs sync-skills via prepack)
+publish: build ##M Publish doucopy to npm (runs sync-skills via prepack). Requires green docs/PUBLISH_CHECKLIST.md
+	@if ! grep -q 'P3' docs/PUBLISH_CHECKLIST.md; then \
+		echo "missing docs/PUBLISH_CHECKLIST.md"; exit 1; \
+	fi
+	@echo "Refusing to publish until docs/PUBLISH_CHECKLIST.md is fully green and you confirmed P3."
+	@echo "Re-run with PUBLISH_I_MEAN_IT=1 after the checklist is complete."
+	@test "$(PUBLISH_I_MEAN_IT)" = "1" || (echo "Set PUBLISH_I_MEAN_IT=1 to proceed."; exit 1)
 	npm publish --access public
+
+live-smoke-cursor: build ##M Live Cursor deny/allow smoke (needs logged-in cursor-agent)
+	PATH="$(HOME)/.local/bin:$$PATH" node scripts/live-smoke-cursor.mjs
 
 # --- Dev-only targets (hidden from help) --------------------------------------
 

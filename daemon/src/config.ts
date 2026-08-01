@@ -20,8 +20,16 @@ export interface ResolvedRestrictions {
   shell: { mode: ShellMode; deny: string[] };
 }
 
-/** Always denied for reads. Cannot be cleared by config. */
-export const BUILTIN_READ_DENY = ["~/.ssh", "~/.aws", "~/.doucopy"] as const;
+/**
+ * Always denied for reads. Cannot be cleared by config.
+ * Note: `~/.doucopy` is NOT listed here as a blanket root. The conversation
+ * workspace lives under it, and Cursor deny-wins would block `task.md`.
+ * `buildPermissions` adds targeted denials for config/policy/sibling workspaces.
+ */
+export const BUILTIN_READ_DENY = ["~/.ssh", "~/.aws"] as const;
+
+/** Home dir for doucopy state. Targeted read/write denials are derived from this. */
+export const DOUCOPY_HOME = "~/.doucopy" as const;
 
 export const DEFAULT_RESTRICTIONS: ResolvedRestrictions = {
   fs_write: { mode: "workspace_only", allow: [] },

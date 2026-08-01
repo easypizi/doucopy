@@ -38,7 +38,7 @@ function describeRestrictions(restrictions: ResolvedRestrictions | undefined, wr
   const readExtra =
     r.fs_read.deny.length > 0
       ? `Additional read-blocked paths: ${r.fs_read.deny.join(", ")}.`
-      : "Sensitive paths (~/.ssh, ~/.aws, ~/.doucopy) are always blocked for reading.";
+      : "Sensitive paths (~/.ssh, ~/.aws, and ~/.doucopy secrets/sibling workspaces) are always blocked for reading.";
   return [
     "## Active tool restrictions (enforced by the harness, non-negotiable)",
     writeLine,

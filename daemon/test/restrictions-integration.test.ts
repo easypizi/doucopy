@@ -72,10 +72,11 @@ describe("restrictions integration scenarios", () => {
       expect.arrayContaining([
         path.join(homedir(), ".ssh"),
         path.join(homedir(), ".aws"),
-        path.join(homedir(), ".doucopy"),
+        path.join(homedir(), ".doucopy/config.json"),
         finance,
       ]),
     );
+    expect(perms.readDeny).not.toContain(workspace);
     expect(perms.cursor.permissions.deny).toContain(`Read(${finance}/**)`);
   });
 });

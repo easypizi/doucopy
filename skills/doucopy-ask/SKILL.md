@@ -43,12 +43,16 @@ There is exactly one exception. If, and only if, you need a clarifying fact from
 - 24-hour retention. After that, `unknown_ticket`.
 - Also returns `unknown_ticket` if the relay was restarted (in-memory storage).
 
+## Remote actions through plain questions
+
+There is no separate action tool. If the peer owner loosened restrictions (`doucopy settings`), a normal `ask_peer` question can ask the remote agent to edit files or run shell commands. If the owner kept the safe default (workspace-only writes, shell off), the remote harness denies those tools. The answer then typically says the action is blocked, or you see a tool/permission error string inside `error` / `answer`. Treat that as intentional owner policy, not a transport failure.
+
 ## Do not
 
 - Do not paste large files or transcripts into the question. The responder has its own memory sources.
 - Do not chain multiple unrelated questions in one `ask_peer` call — one question per ticket. Use `conversation_id` for related follow-ups.
 - Do not retry `ask_peer` on `pending`. It creates a duplicate ticket. Use `check_reply` instead.
-- Do not assume the responder shares your policy view. It has its own `policy.md`; if it refuses or generalises, that is intentional.
+- Do not assume the responder shares your policy view. It has its own `policy.md` and `restrictions`. If it refuses, generalises, or reports a permission deny, that is intentional.
 
 ## Costs
 

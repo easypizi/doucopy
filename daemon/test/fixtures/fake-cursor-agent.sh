@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Test stub for cursor-agent. Logs args, answers a fixed string.
 if [ -n "${FAKE_AGENT_LOG:-}" ]; then
+  printf 'cwd=%s\n' "$PWD" >> "$FAKE_AGENT_LOG"
   printf '%s\n' "$@" >> "$FAKE_AGENT_LOG"
 fi
 if [ "${FAKE_AGENT_MODE:-ok}" = "empty" ]; then

@@ -275,7 +275,7 @@ async function editRestrictionsInteractive(current: RestrictionsSettings): Promi
     );
   }
   const readDeny = await pickPresetsWithCustom(
-    "Extra read-deny folders (~/.ssh, ~/.aws, ~/.doucopy always denied)",
+    "Extra read-deny folders (~/.ssh, ~/.aws, ~/.doucopy secrets always denied)",
     READ_DENY_PRESETS,
     current.fs_read.deny,
   );
