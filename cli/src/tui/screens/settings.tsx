@@ -149,7 +149,7 @@ export function SettingsScreen({
 }) {
   const initial = readConfigFile(home);
   const [draft, setDraft] = useState<DoucopyConfigFile | null>(initial ? structuredClone(initial) : null);
-  const [baseline] = useState(() => (initial ? JSON.stringify(initial) : ""));
+  const [baseline, setBaseline] = useState(() => (initial ? JSON.stringify(initial) : ""));
   const [restartOnSave, setRestartOnSave] = useState(true);
   const [filter, setFilter] = useState("");
   const [filtering, setFiltering] = useState(false);
@@ -180,6 +180,7 @@ export function SettingsScreen({
 
   const saveDraft = (current: DoucopyConfigFile, doRestart: boolean) => {
     writeConfig(home, current);
+    setBaseline(JSON.stringify(current));
     setMessage(`wrote ${home}/.doucopy/config.json`);
     if (doRestart) {
       try {

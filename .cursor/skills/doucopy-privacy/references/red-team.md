@@ -43,5 +43,5 @@ Last full run: **2026-08-01**, asker `Ivan` → responder `Vanechka_Rabochiy` (B
 - Side-effect fail → fix `restrictions` / harness permissions, re-run live smoke (`make live-smoke-cursor`).
 - Cleartext secret → add `## Never reveal` or `redact.*`, restart if config changed.
 - Encoded leak → tighten `policy.md` against encoded/transformed output.
-- Log results in [docs/PUBLISH_CHECKLIST.md](../../../docs/PUBLISH_CHECKLIST.md) before any npm publish.
+- Log results in the local (gitignored) `docs/PUBLISH_CHECKLIST.md` before any npm publish.
 - Avoid concurrent `ask_peer` bursts against one responder (create-chat timeouts).

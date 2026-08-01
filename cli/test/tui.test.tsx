@@ -144,6 +144,173 @@ describe("Settings screen", () => {
     frame = lastFrame() ?? "";
     expect(frame).toContain("Discard");
   });
+
+  it("clears dirty after save so Esc does not discard", async () => {
+    const home = writeConfigHome();
+    const { lastFrame, stdin, unmount } = render(<SettingsScreen home={home} inputActive />);
+    cleanups.push(unmount);
+    await new Promise((r) => setTimeout(r, 50));
+    for (let i = 0; i < 8; i += 1) {
+      stdin.write("\u001B[B");
+      await new Promise((r) => setTimeout(r, 15));
+    }
+    stdin.write(" ");
+    await new Promise((r) => setTimeout(r, 60));
+    expect(lastFrame()).toMatch(/unsaved/);
+
+    stdin.write("\x13"); // Ctrl+S
+    await new Promise((r) => setTimeout(r, 120));
+    let frame = lastFrame() ?? "";
+    expect(frame).not.toMatch(/● unsaved/);
+
+    stdin.write("\u001B");
+    await new Promise((r) => setTimeout(r, 80));
+    frame = lastFrame() ?? "";
+    expect(frame).not.toContain("Discard");
+  });
+});
+
+describe("TextPrompt mask", () => {
+  it("does not render secret plaintext when mask is on", async () => {
+    const { TextPrompt } = await import("../src/tui/components/TextPrompt.js");
+    const { lastFrame, stdin, unmount } = render(
+      <TextPrompt label="RELAY_SECRET" mask onSubmit={() => undefined} onCancel={() => undefined} />,
+    );
+    cleanups.push(unmount);
+    await new Promise((r) => setTimeout(r, 30));
+    stdin.write("supersecret-value");
+    await new Promise((r) => setTimeout(r, 50));
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("RELAY_SECRET");
+    expect(frame).not.toContain("supersecret-value");
+    expect(frame).toMatch(/\*+/);
+  });
+});
+
+describe("Chat pending poll", () => {
+  it("shows reply after pending then answered", async () => {
+    const { ChatScreen } = await import("../src/tui/screens/chat.js");
+    let polls = 0;
+    const snap = emptySnap({
+      joined: true,
+      config: {
+        self_peer: "Ivan",
+        relay_url: "https://r.example.com",
+        token: "tok",
+        responder: { model: "composer-2.5", harness: "cursor-agent" },
+      },
+      peers: [
+        { name: "Ivan", online: true, self: true },
+        { name: "work", online: true, self: false },
+      ],
+    });
+    const { lastFrame, unmount } = render(
+      <ChatScreen
+        snap={snap}
+        inputActive
+        initialAsk={{ peer: "work", question: "ping please" }}
+        deps={{
+          askPeer: async () => ({
+            status: "pending",
+            ticket_id: "ticket-pending-1",
+            conversation_id: "conv-1",
+          }),
+          fetchReply: async () => {
+            polls += 1;
+            if (polls < 2) {
+              return { status: "pending", ticket_id: "ticket-pending-1" };
+            }
+            return {
+              status: "answered",
+              ticket_id: "ticket-pending-1",
+              answer: "PONG-from-work",
+            };
+          },
+        }}
+      />,
+    );
+    cleanups.push(unmount);
+    await new Promise((r) => setTimeout(r, 400));
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("PONG-from-work");
+    expect(polls).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("Setup join happy path", () => {
+  it("joinRelay then finalizeJoin with injected deps", async () => {
+    const { SetupScreen } = await import("../src/tui/screens/setup.js");
+    const home = mkdtempSync(path.join(tmpdir(), "doucopy-setup-"));
+    mkdirSync(path.join(home, ".doucopy"), { recursive: true });
+    const joinCalls: string[] = [];
+    const joinRelay = async (_url: string, invite: string, name: string) => {
+      joinCalls.push(`${invite}:${name}`);
+      return { peer: name, token: "tok-join" };
+    };
+    const finalizeJoin = async () => ({
+      ok: true,
+      messages: ["config written", "daemon skipped (asker-only)"],
+      errors: [] as string[],
+    });
+
+    const { lastFrame: joinFrame, unmount: uJoin } = render(
+      <SetupScreen
+        home={home}
+        deps={{ joinRelay, finalizeJoin, clearDraft: () => undefined, areAllSkillsInstalled: () => true }}
+        testBootstrap={{
+          phase: { kind: "joining" },
+          data: {
+            relayUrl: "https://relay.example.com",
+            invite: "ali1.test",
+            peer: "test-peer",
+            askers: ["cursor"],
+            responder: "asker-only",
+            wantSkills: false,
+            neverReveal: [],
+            restrictions: {
+              fs_write: { mode: "workspace_only", allow: [] },
+              fs_read: { deny: [] },
+              shell: { mode: "off", deny: [] },
+            },
+          },
+        }}
+      />,
+    );
+    cleanups.push(uJoin);
+    await new Promise((r) => setTimeout(r, 120));
+    expect(joinCalls).toEqual(["ali1.test:test-peer"]);
+    expect(joinFrame() ?? "").toMatch(/Askers|Joining|ask/i);
+
+    const { lastFrame, unmount } = render(
+      <SetupScreen
+        home={home}
+        deps={{ joinRelay, finalizeJoin, clearDraft: () => undefined, areAllSkillsInstalled: () => true }}
+        testBootstrap={{
+          phase: { kind: "finalize" },
+          data: {
+            relayUrl: "https://relay.example.com",
+            invite: "ali1.test",
+            peer: "test-peer",
+            token: "tok-join",
+            askers: ["cursor"],
+            responder: "asker-only",
+            wantSkills: false,
+            neverReveal: [],
+            restrictions: {
+              fs_write: { mode: "workspace_only", allow: [] },
+              fs_read: { deny: [] },
+              shell: { mode: "off", deny: [] },
+            },
+          },
+        }}
+      />,
+    );
+    cleanups.push(unmount);
+    await new Promise((r) => setTimeout(r, 150));
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Setup complete");
+    expect(frame).toContain("config written");
+  });
 });
 
 describe("App shell", () => {

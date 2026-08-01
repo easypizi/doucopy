@@ -8,6 +8,7 @@ export function TextPrompt({
   initial = "",
   placeholder,
   validate,
+  mask = false,
   onSubmit,
   onCancel,
 }: {
@@ -15,6 +16,8 @@ export function TextPrompt({
   initial?: string;
   placeholder?: string;
   validate?: (value: string) => string | true;
+  /** When true, show * instead of characters (secrets). */
+  mask?: boolean;
   onSubmit: (value: string) => void;
   onCancel: () => void;
 }) {
@@ -33,6 +36,7 @@ export function TextPrompt({
         <TextInput
           value={value}
           placeholder={placeholder}
+          mask={mask ? "*" : undefined}
           onChange={(v) => {
             setValue(v);
             setError(null);

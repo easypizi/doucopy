@@ -9,7 +9,7 @@ John's agent:  We use session cookies plus a refresh token in httpOnly storage. 
 You:  (the answer lands in the same chat)
 ```
 
-After `join`, natural language is the primary interface. Skills installed in wizard step 4 tell your agent when to call `ask_peer`. You do not need to memorize MCP tool names for daily use.
+After `join`, natural language inside your coding app is the primary interface. Skills installed in wizard step 4 tell your agent when to call `ask_peer`. You can also operate doucopy from the interactive TUI or classic CLI (see [Daily use](#daily-use)).
 
 Got an invite? One command:
 
@@ -133,33 +133,48 @@ Local relay for testing: `make relay RELAY_SECRET=$(openssl rand -hex 32)`.
 
 ## Daily use
 
-### Natural language (primary)
+Three surfaces. Pick whichever fits the moment.
 
-After `join`, talk to your own coding agent in a normal phrase:
+### 1. Inside coding apps (primary)
+
+After `join`, talk to Cursor / Claude Code / Codex in normal language:
 
 - "Ask my work machine what I decided about billing last week."
 - "Ask John's agent how auth works in their Cursor setup."
 
-Skills installed during join (wizard step 4) tell the agent when to call `ask_peer`. Follow-ups in the same thread reuse `conversation_id` automatically when your agent keeps the thread.
+Skills installed during join (wizard step 4) call `ask_peer` for you. Follow-ups in the same thread reuse `conversation_id` when your agent keeps the thread. For raw tool shapes when debugging, see [MCP reference](#mcp-reference).
 
-### From the terminal
+### 2. Interactive TUI
+
+On a TTY, bare `doucopy` opens one Ink shell with a live header (peer, model, harness, daemon, keep-awake, peers online, queues) and tabs: Status, Settings, Peers, Chat, Setup, Ops.
 
 ```bash
-npx doucopy                           # interactive TUI (Status header: peers, daemon, queues)
-npx doucopy chat                      # TUI Chat tab (or plain REPL if non-TTY)
-npx doucopy status                    # TUI Status (or one-shot dump if non-TTY)
-npx doucopy settings                  # TUI Settings: searchable switches, Esc discards
-npx doucopy policy                    # opens ~/.doucopy/policy.md in $EDITOR
-npx doucopy logs -f                   # tail the responder log (stream, not TUI)
-npx doucopy pause work-mbp --for 2h   # local mute: refuse their questions (does not stop their daemon)
-npx doucopy resume work-mbp
-npx doucopy start | stop | restart    # control the launchd daemon
-npx doucopy invite --ttl 48           # mint an invite from this machine
+npx doucopy                           # AppShell home (Status)
+npx doucopy status                    # Status tab
+npx doucopy settings                  # searchable switches, Esc discards unsaved
+npx doucopy chat                      # Chat tab (ask peers, poll pending replies)
+npx doucopy join | setup | invite     # Setup / Invite wizards in the same shell
+npx doucopy pause | resume            # Peers tab
 ```
 
-On a TTY, bare `doucopy` and most interactive commands open one Ink shell (tabs: Status, Settings, Peers, Chat, Setup, Ops) with a live header. Use `--yes` or `DOUCOPY_NO_TUI=1` for the classic non-interactive CLI.
+Settings: draft + explicit save (Ctrl+S). Esc discards with confirm if dirty. Invite `RELAY_SECRET` input is masked. Tab / arrows switch tabs. `q` quits.
 
-Every command has a `make` alias for a repo checkout: `make chat`, `make status`, `make settings`, `make policy`, `make invite`, `make pause PEER=work-mbp FOR=2h`, and so on. Run `make` for the full list.
+### 3. Classic CLI
+
+Use when non-TTY, scripting, or you want streams instead of the full-screen UI:
+
+```bash
+DOUCOPY_NO_TUI=1 npx doucopy status   # one-shot text dump
+npx doucopy join <url> <invite> --yes # non-interactive join
+npx doucopy logs -f                   # tail responder logs
+npx doucopy policy                    # opens ~/.doucopy/policy.md in $EDITOR
+npx doucopy start | stop | restart    # launchd daemon
+npx doucopy pause work-mbp --for 2h
+npx doucopy resume work-mbp
+npx doucopy invite --ttl 48 --yes
+```
+
+`--yes` and `DOUCOPY_NO_TUI=1` force the classic path. From a repo checkout every command has a `make` alias (`make chat`, `make status`, `make settings`, …). Run `make` for the full list.
 
 ### Restrictions and filtering
 
@@ -217,16 +232,16 @@ doucopy is built for a small circle of trusted machines, tens rather than thousa
 
 ### Threat model
 
-doucopy assumes a **trusted circle** of invited peers and an **untrusted question**. Anyone with a valid peer token can ask your responder. Controls on the answering machine (restrictions, `policy.md`, redact, invite/revoke) limit damage from a compromised asker. We do **not** promise isolation against a malicious peer that already holds a valid token. See [docs/adr/0001-trusted-circle-untrusted-question.md](docs/adr/0001-trusted-circle-untrusted-question.md) and [CONTEXT.md](CONTEXT.md).
+doucopy assumes a **trusted circle** of invited peers and an **untrusted question**. Anyone with a valid peer token can ask your responder. Controls on the answering machine (restrictions, `policy.md`, redact, invite/revoke) limit damage from a compromised asker. We do **not** promise isolation against a malicious peer that already holds a valid token. See [CONTEXT.md](CONTEXT.md).
 
 ### Operational limits
 
 - **Responder daemon is macOS-only** (`launchd`). Linux machines can join as askers.
 - **Stopped daemon = no live answers.** A valid token still authenticates to the relay, but nothing runs the harness until the daemon long-polls again. Questions may queue (`peer_offline`) for up to 24h.
-- **Keep awake (default on).** While the responder daemon runs, launchd wraps it in `caffeinate` so the Mac does not idle-sleep and peers can still reach you. Every 3 days (configurable) macOS asks whether to keep it. Decline or ignore past the grace window stops the daemon. Configure via `npx doucopy settings` → Keep awake, or `keep_awake` in `~/.doucopy/config.json`. True power-off still means offline.
+- **Keep awake (default on).** While the responder daemon runs, launchd wraps it in `caffeinate` so the Mac does not idle-sleep and peers can still reach you. Every 3 days (configurable) macOS asks whether to keep it. **Keep** or Esc/Cancel resets the timer. **Stop** unloads the daemon. If the dialog never appears (SSH / no GUI) or you ignore it past the grace window, the daemon stops. Configure via `npx doucopy settings` → Keep awake, or `keep_awake` in `~/.doucopy/config.json`. True power-off still means offline.
 - **Relay restart drops in-flight questions.** All relay state (open tickets, presence) lives in memory. Queued questions survive for 24h only while the relay is up.
 - **No horizontal scaling.** One relay instance by design. Fine for a personal circle, not for a SaaS.
-- **Cursor write lockdown is permissions-based**, not a full OS sandbox. Default deny targets common home folders. Prove with the live smoke in `docs/PUBLISH_CHECKLIST.md` before trusting a release.
+- **Cursor write lockdown is permissions-based**, not a full OS sandbox. Default deny targets common home folders. Prove with the live smoke (`make live-smoke-cursor`) before trusting a release.
 - **Codex sandbox is coarse** (`--sandbox` modes only). Per-path write allows and shell deny patterns are approximate there.
 - **Old npm versions stay MIT.** Versions published before the license change remain under their original license.
 

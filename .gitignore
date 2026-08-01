@@ -2,5 +2,4 @@ node_modules/
 dist/
 *.log
 *.local.md
-docs/live-smoke-cursor-last.json
-docs/live-smoke-claude-last.json
+docs/

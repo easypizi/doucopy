@@ -106,6 +106,7 @@ export function InviteScreen({ home, inputActive }: { home: string; inputActive:
     return (
       <TextPrompt
         label="RELAY_SECRET"
+        mask
         onCancel={() => setStep({ kind: "mode" })}
         validate={(v) => (v.trim() ? true : "required")}
         onSubmit={(secret) => void mintWithSecret(secret.trim())}

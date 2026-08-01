@@ -51,7 +51,7 @@ cli/                  doucopy CLI (bin aliases: doucopy, agent-link)
 
 Dockerfile            relay image for self-hosting
 app.json              Heroku Deploy button config
-docs/superpowers/     specs, plans
+docs/                 local specs/plans/checklist (gitignored)
 ```
 
 ## Invariants — do not break these

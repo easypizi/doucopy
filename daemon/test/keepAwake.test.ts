@@ -116,4 +116,83 @@ describe("keepAwakeTick", () => {
     expect(result).toBe("stop");
     expect(stop).toHaveBeenCalledOnce();
   });
+
+  it("treats dialog cancel as keep and resets timer", async () => {
+    const stop = vi.fn();
+    let state: KeepAwakeState = { confirmed_at: "2026-07-01T00:00:00.000Z" };
+    const now = Date.parse("2026-08-01T12:00:00.000Z");
+    const result = await keepAwakeTick(
+      resolveKeepAwake({ enabled: true, confirm_days: 3 }),
+      {
+        now: () => now,
+        readState: () => state,
+        writeState: (s) => { state = s; },
+        stopDaemon: stop,
+        askConfirm: async () => "keep",
+        log: () => {},
+      },
+    );
+    expect(result).toBe("continue");
+    expect(stop).not.toHaveBeenCalled();
+    expect(state.awaiting_confirm).toBe(false);
+    expect(Date.parse(state.confirmed_at)).toBe(now);
+  });
+
+  it("leaves awaiting on unavailable then stops after grace on next tick", async () => {
+    const stop = vi.fn();
+    let state: KeepAwakeState = { confirmed_at: "2026-07-01T00:00:00.000Z" };
+    const shown = Date.parse("2026-08-01T12:00:00.000Z");
+    const first = await keepAwakeTick(
+      resolveKeepAwake({ enabled: true, confirm_days: 3, confirm_grace_hours: 24 }),
+      {
+        now: () => shown,
+        readState: () => state,
+        writeState: (s) => { state = s; },
+        stopDaemon: stop,
+        askConfirm: async () => "unavailable",
+        waitMs: async () => new Promise(() => {}),
+        log: () => {},
+      },
+    );
+    expect(first).toBe("continue");
+    expect(stop).not.toHaveBeenCalled();
+    expect(state.awaiting_confirm).toBe(true);
+
+    const second = await keepAwakeTick(
+      resolveKeepAwake({ enabled: true, confirm_days: 3, confirm_grace_hours: 24 }),
+      {
+        now: () => shown + 24 * 60 * 60 * 1000,
+        readState: () => state,
+        writeState: (s) => { state = s; },
+        stopDaemon: stop,
+        askConfirm: async () => "keep",
+        log: () => {},
+      },
+    );
+    expect(second).toBe("stop");
+    expect(stop).toHaveBeenCalledOnce();
+  });
+
+  it("stops when grace elapses while askConfirm is still open", async () => {
+    const stop = vi.fn();
+    const cancelAsk = vi.fn();
+    let state: KeepAwakeState = { confirmed_at: "2026-07-01T00:00:00.000Z" };
+    const now = Date.parse("2026-08-01T12:00:00.000Z");
+    const result = await keepAwakeTick(
+      resolveKeepAwake({ enabled: true, confirm_days: 3, confirm_grace_hours: 24 }),
+      {
+        now: () => now,
+        readState: () => state,
+        writeState: (s) => { state = s; },
+        stopDaemon: stop,
+        askConfirm: () => new Promise(() => {}),
+        waitMs: async () => {},
+        cancelAsk,
+        log: () => {},
+      },
+    );
+    expect(result).toBe("stop");
+    expect(stop).toHaveBeenCalledOnce();
+    expect(cancelAsk).toHaveBeenCalledOnce();
+  });
 });

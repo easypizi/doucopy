@@ -83,33 +83,59 @@ function safeRestrictions(): RestrictionsSettings {
   };
 }
 
+export type SetupScreenDeps = {
+  joinRelay?: typeof joinRelay;
+  finalizeJoin?: typeof finalizeJoin;
+  clearDraft?: typeof clearDraft;
+  areAllSkillsInstalled?: typeof areAllSkillsInstalled;
+};
+
+/** Test-only bootstrap to skip the interactive prefix of the wizard. */
+export type SetupTestBootstrap = {
+  phase: Phase;
+  data: Partial<Draft>;
+};
+
 export function SetupScreen({
   home,
   setupMode,
   argv = [],
+  deps,
+  testBootstrap,
 }: {
   home: string;
   setupMode?: boolean;
   argv?: string[];
   inputActive?: boolean;
+  deps?: SetupScreenDeps;
+  testBootstrap?: SetupTestBootstrap;
 }) {
+  const joinRelayFn = deps?.joinRelay ?? joinRelay;
+  const finalizeJoinFn = deps?.finalizeJoin ?? finalizeJoin;
+  const clearDraftFn = deps?.clearDraft ?? clearDraft;
+  const skillsInstalledFn = deps?.areAllSkillsInstalled ?? areAllSkillsInstalled;
+
   const existing = useMemo(() => readExistingConnection(home), [home]);
   const draftPrefill = useMemo(() => readDraft(home), [home]);
   const flagUrl = argv[0];
   const flagInvite = argv[1];
 
   const [phase, setPhase] = useState<Phase>(() => {
+    if (testBootstrap) return testBootstrap.phase;
     if (setupMode) return { kind: "owner_app" };
     if (existing && !flagUrl && !flagInvite) return { kind: "reuse" };
     return { kind: "relay" };
   });
-  const [data, setData] = useState<Partial<Draft>>({
-    relayUrl: flagUrl ? normalizeRelayUrl(flagUrl) : draftPrefill?.relayUrl,
-    invite: flagInvite ?? draftPrefill?.invite,
-    restrictions: safeRestrictions(),
-    neverReveal: [],
-    askers: [],
-    wantSkills: true,
+  const [data, setData] = useState<Partial<Draft>>(() => {
+    if (testBootstrap) return { ...testBootstrap.data };
+    return {
+      relayUrl: flagUrl ? normalizeRelayUrl(flagUrl) : draftPrefill?.relayUrl,
+      invite: flagInvite ?? draftPrefill?.invite,
+      restrictions: safeRestrictions(),
+      neverReveal: [],
+      askers: [],
+      wantSkills: true,
+    };
   });
   const [log, setLog] = useState<string[]>([]);
   const ran = useRef<string>("");
@@ -152,7 +178,7 @@ export function SetupScreen({
       }
       void (async () => {
         try {
-          const joined = await joinRelay(data.relayUrl!, data.invite!, data.peer!);
+          const joined = await joinRelayFn(data.relayUrl!, data.invite!, data.peer!);
           setData((d) => ({ ...d, token: joined.token, peer: joined.peer }));
           pushLog(`joined as "${joined.peer}"`);
           setPhase({ kind: "askers" });
@@ -170,7 +196,7 @@ export function SetupScreen({
     if (phase.kind === "skills") {
       ran.current = key;
       const skillClients = (data.askers ?? []).filter((c): c is "cursor" | "claude" => c === "cursor" || c === "claude");
-      if (skillClients.length === 0 || areAllSkillsInstalled(home, skillClients)) {
+      if (skillClients.length === 0 || skillsInstalledFn(home, skillClients)) {
         setData((d) => ({ ...d, wantSkills: false }));
         setPhase({ kind: "never" });
       }
@@ -186,7 +212,7 @@ export function SetupScreen({
     if (phase.kind === "finalize") {
       ran.current = key;
       void (async () => {
-        const result = await finalizeJoin(home, {
+        const result = await finalizeJoinFn(home, {
           relayUrl: data.relayUrl!,
           peer: data.peer!,
           token: data.token!,
@@ -196,11 +222,11 @@ export function SetupScreen({
           neverReveal: data.neverReveal ?? [],
           restrictions: data.restrictions ?? safeRestrictions(),
         });
-        if (result.ok) clearDraft(home);
+        if (result.ok) clearDraftFn(home);
         setPhase({ kind: "done", ok: result.ok, messages: [...result.messages, ...result.errors] });
       })();
     }
-  }, [phase, data, home]);
+  }, [phase, data, home, joinRelayFn, finalizeJoinFn, clearDraftFn, skillsInstalledFn]);
 
   if (phase.kind === "owner_app") {
     return (

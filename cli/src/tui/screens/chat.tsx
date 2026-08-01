@@ -33,15 +33,28 @@ function newId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+export type ChatScreenDeps = {
+  askPeer?: typeof askPeer;
+  fetchReply?: typeof fetchReply;
+};
+
 export function ChatScreen({
   snap,
   inputActive,
   onBusyChange,
+  deps,
+  initialAsk,
 }: {
   snap: StatusSnapshot;
   inputActive: boolean;
   onBusyChange?: (busy: boolean) => void;
+  deps?: ChatScreenDeps;
+  /** Test helper: fire one ask on mount. */
+  initialAsk?: { peer: string; question: string };
 }) {
+  const askPeerFn = deps?.askPeer ?? askPeer;
+  const fetchReplyFn = deps?.fetchReply ?? fetchReply;
+  const initialAskRef = useRef(initialAsk);
   const { exit } = useApp();
   const others = useMemo(() => {
     const list = snap.peers.filter((p) => !p.self);
@@ -141,7 +154,7 @@ export function ChatScreen({
     setPending((n) => n + 1);
     try {
       for (let i = 0; i < REPLY_MAX; i += 1) {
-        const reply = await fetchReply(snap.config.relay_url, snap.config.token, ticketId, REPLY_WAIT);
+        const reply = await fetchReplyFn(snap.config.relay_url, snap.config.token, ticketId, REPLY_WAIT);
         if (reply.status === "answered") {
           push({
             kind: "reply",
@@ -190,7 +203,7 @@ export function ChatScreen({
     });
 
     try {
-      const r = await askPeer(snap.config.relay_url, snap.config.token, {
+      const r = await askPeerFn(snap.config.relay_url, snap.config.token, {
         peer,
         question,
         conversation_id: conv ?? undefined,
@@ -224,6 +237,14 @@ export function ChatScreen({
       });
     }
   };
+
+  useEffect(() => {
+    const ask = initialAskRef.current;
+    if (!ask) return;
+    initialAskRef.current = undefined;
+    void sendAsk(ask.peer, ask.question);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once on mount for tests
+  }, []);
 
   const openAskPicker = (question?: string) => {
     if (others.length === 0) {

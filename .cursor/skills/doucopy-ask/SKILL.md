@@ -38,7 +38,7 @@ Many MCP hosts (Claude Code especially) **abort long tool calls after a few seco
 4. If still `pending` → call `check_reply` again with `wait_seconds: 180`. Repeat until `answered`, `error`, `unknown_ticket`, or ~10 minutes wall time.
 5. **Stay silent toward the user while polling.** No "still pending", no "want me to check?". Only speak when you have a final result, or when the budget is exhausted.
 
-If the user said something like "пришли ответ когда ответит" / "check until they answer" / "don't spam me", that means: silent loop above, one message when done.
+If the user said something like "send the answer when they reply" / "check until they answer" / "don't spam me", that means: silent loop above, one message when done.
 
 ### Offline peers
 
