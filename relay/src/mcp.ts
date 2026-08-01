@@ -24,12 +24,12 @@ type ToolExtra = {
   }) => Promise<void>;
 };
 
-function withKeepalive(
+function withKeepalive<T>(
   extra: ToolExtra,
   keepaliveIntervalMs: number,
   message: string,
-  work: () => Promise<unknown>,
-): Promise<unknown> {
+  work: () => Promise<T>,
+): Promise<T> {
   // Heroku's router kills silent connections after 30s, so ping the SSE stream while waiting.
   let keepaliveFailureLogged = false;
   const keepalive = setInterval(() => {
