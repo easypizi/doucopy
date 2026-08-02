@@ -12,14 +12,19 @@ import { runDeploy, runHealth, runRevoke, runSecretRotate, runUnrevoke } from ".
 import { runPause, runResume } from "./pause.js";
 import { runPolicy } from "./policy.js";
 import { runRelay } from "./relay.js";
-import { runSettings } from "./settings.js";
+import { readConfigFile, runSettings } from "./settings.js";
 import { runSetup } from "./setup-wizard.js";
 import { runStatus } from "./status.js";
 import { canUseTui, launchTui } from "./tui/launch.js";
 
+function isJoined(home: string): boolean {
+  const config = readConfigFile(home);
+  return Boolean(config?.relay_url && config?.token && config?.self_peer);
+}
+
 const USAGE = `Usage: doucopy [command]
 
-Interactive TUI (TTY): bare \`doucopy\` opens Status. Subcommands open the same
+Interactive TUI (TTY): bare \`doucopy\` opens Setup if not joined, else Status. Subcommands open the same
 shell on the matching screen. Use --yes or DOUCOPY_NO_TUI=1 for plain CLI.
 
 Setup
@@ -228,7 +233,8 @@ async function main(): Promise<void> {
       return;
     case undefined:
       if (tui) {
-        await launchTui({ screen: "status" });
+        // New machine: land in Setup so join/config is interactive. Joined → Status.
+        await launchTui({ screen: isJoined(home) ? "status" : "setup", setupMode: false });
         return;
       }
       console.log(USAGE);

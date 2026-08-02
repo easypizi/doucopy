@@ -16,15 +16,23 @@ John's agent:  Session cookies + refresh token in httpOnly storage. See AGENTS.m
 
 ## Install
 
-Got an invite?
+Published on npm: **[doucopy](https://www.npmjs.com/package/doucopy)**. No repo clone needed to join a circle.
 
 ```bash
-npx doucopy join <relay-url> <invite>
+npm install -g doucopy
+doucopy
 ```
 
-The wizard wires Cursor / Claude Code / Codex, installs the responder daemon, and you're done. Restart your coding agent so it picks up MCP.
+That's it. One command opens the TUI:
 
-Full wizard details: [guides/install.md](guides/install.md).
+- **not set up yet** → **Setup** (paste relay URL + invite, finish the wizard)
+- **already joined** → **Status**
+
+Optional shortcut with invite prefilled: `doucopy join <relay-url> <invite>` (same Setup tab).
+
+After Setup: check **Status**, tweak **Settings** if you want, try **Chat**, then restart your coding agent once so MCP loads. Day to day: `doucopy`, or ask from Cursor / Claude / Codex (“Ask \<peer\> …”).
+
+No global install: `npx doucopy@latest`. Host the relay: [guides/hosting.md](guides/hosting.md). Details: [guides/install.md](guides/install.md).
 
 ## Why does this exist?
 
@@ -51,7 +59,7 @@ Two parts: a **relay** someone hosts once, a **responder daemon** on every answe
 | Surface | How |
 |---|---|
 | **Coding apps** | "Ask my work machine what I decided about billing." |
-| **TUI** | `npx doucopy` — Status / Settings / Peers / Chat (Ctrl+C twice to quit) |
+| **TUI** | `doucopy` — Setup if new, else Status / Settings / Chat (Ctrl+C twice to quit) |
 | **Classic CLI** | `DOUCOPY_NO_TUI=1`, `--yes`, `logs -f`, scripted join |
 
 More: [guides/daily-use.md](guides/daily-use.md).

@@ -1,10 +1,34 @@
 # Install
 
-You need Node 22 and an invite code (looks like `ali1.eyJ...`). Then:
+Package: [doucopy on npm](https://www.npmjs.com/package/doucopy). You need Node 22 and an invite code (looks like `ali1.eyJ...`). No repo clone required to join.
+
+On a TTY the CLI opens the **Ink TUI**. You configure everything there (not a separate classic wizard).
+
+| Command | If not joined | If joined |
+|---|---|---|
+| `doucopy` | **Setup** tab | **Status** tab |
+| `doucopy join [url] [invite]` | **Setup** (prefills url/invite) | Setup again to reconfigure |
 
 ```bash
-npx doucopy join <relay-url> <invite>
+npm install -g doucopy
+doucopy                              # → Setup when fresh
+doucopy join <relay-url> <invite>    # same TUI, fields prefilled
+
+# without global install
+npx doucopy@latest
 ```
+
+## First-run order
+
+1. `npm install -g doucopy` then `doucopy` (or `doucopy join <url> <invite>`).
+2. Finish Setup in the TUI (name, askers, harness, skills, never-reveal, restrictions).
+3. Tab → **Status** / **Settings** / **Chat**.
+4. Restart Cursor / Claude Code / Codex so MCP loads.
+5. Day-to-day: `doucopy`, or ask from your coding agent in natural language.
+
+Use `--yes` / `DOUCOPY_NO_TUI=1` only for scripts (classic non-interactive join).
+
+## Setup screens (TUI)
 
 The wizard asks:
 

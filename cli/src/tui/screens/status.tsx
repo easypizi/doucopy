@@ -37,7 +37,7 @@ export function StatusScreen({
       <Panel title="Status" flexGrow={1}>
         <Box marginY={1} flexDirection="column">
           <Text color={theme.warn}>No config yet.</Text>
-          <Text>Open the Setup tab (or run doucopy join) to connect.</Text>
+          <Text>Tab to Setup (or run doucopy join) and finish the wizard in the TUI.</Text>
         </Box>
       </Panel>
     );
