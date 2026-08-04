@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  WINDOWS_TASK_NAME,
+  applyWindowsStayAwake,
   ensureInitialConfirmation,
   graceExpired,
   keepAwakeTick,
   needsConfirmPrompt,
+  parseMessageBoxChoice,
+  stopWindowsScheduledTask,
   type KeepAwakeState,
 } from "../src/keepAwake.js";
 import { DEFAULT_KEEP_AWAKE, resolveKeepAwake } from "../src/config.js";
@@ -194,5 +198,45 @@ describe("keepAwakeTick", () => {
     expect(result).toBe("stop");
     expect(stop).toHaveBeenCalledOnce();
     expect(cancelAsk).toHaveBeenCalledOnce();
+  });
+
+  it("invokes stayAwake each tick when provided", async () => {
+    const stayAwake = vi.fn();
+    let state: KeepAwakeState = { confirmed_at: "2026-08-01T00:00:00.000Z" };
+    await keepAwakeTick(resolveKeepAwake({ enabled: true, confirm_days: 0 }), {
+      now: () => Date.parse("2026-08-01T12:00:00.000Z"),
+      readState: () => state,
+      writeState: (s) => { state = s; },
+      stayAwake,
+      log: () => {},
+    });
+    expect(stayAwake).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Windows keep_awake helpers", () => {
+  it("parseMessageBoxChoice maps Yes/No/Cancel", () => {
+    expect(parseMessageBoxChoice("Yes")).toBe("keep");
+    expect(parseMessageBoxChoice("keep")).toBe("keep");
+    expect(parseMessageBoxChoice("No")).toBe("stop");
+    expect(parseMessageBoxChoice("stop")).toBe("stop");
+    expect(parseMessageBoxChoice("Cancel")).toBe("keep");
+    expect(parseMessageBoxChoice("")).toBe("unavailable");
+  });
+
+  it("applyWindowsStayAwake runs the SetThreadExecutionState script", () => {
+    const run = vi.fn().mockReturnValue({ status: 0, stdout: "", stderr: "" });
+    expect(applyWindowsStayAwake(run)).toBe(true);
+    expect(run).toHaveBeenCalledOnce();
+    const script = String(run.mock.calls[0]?.[0] ?? "");
+    expect(script).toContain("SetThreadExecutionState");
+    expect(script).toContain("0x80000041");
+  });
+
+  it("stopWindowsScheduledTask ends and deletes the doucopy task", () => {
+    const run = vi.fn().mockReturnValue({ status: 0, stdout: "", stderr: "" });
+    stopWindowsScheduledTask(run);
+    expect(run).toHaveBeenCalledWith(["/End", "/TN", WINDOWS_TASK_NAME]);
+    expect(run).toHaveBeenCalledWith(["/Delete", "/TN", WINDOWS_TASK_NAME, "/F"]);
   });
 });

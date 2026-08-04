@@ -2,9 +2,31 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  installWindowsDaemon,
+  isWindowsDaemonRunning,
+  stopWindowsDaemon,
+} from "./windows-task.js";
 
 const LABEL = "com.doucopy.responder";
 const LEGACY_LABEL = "com.agent-link.responder";
+
+export const RESPONDER_DAEMON_UNSUPPORTED =
+  "responder daemon is only supported on macOS (launchd) and Windows (Task Scheduler)";
+
+export function responderDaemonSupported(
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return platform === "darwin" || platform === "win32";
+}
+
+function assertResponderDaemonSupported(
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (!responderDaemonSupported(platform)) {
+    throw new Error(RESPONDER_DAEMON_UNSUPPORTED);
+  }
+}
 
 export function packageRoot(): string {
   // cli/dist/launchd.js -> package root is two levels up
@@ -69,7 +91,7 @@ function teardownLegacyDaemon(home: string): void {
   rmSync(legacyDst, { force: true });
 }
 
-export function installDaemon(home: string): void {
+function installLaunchdDaemon(home: string): void {
   const root = packageRoot();
   const daemonEntry = path.join(root, "daemon/dist/index.js");
   if (!existsSync(daemonEntry)) {
@@ -88,18 +110,55 @@ export function installDaemon(home: string): void {
   execFileSync("launchctl", ["load", dst]);
 }
 
-export function startDaemon(home: string): void {
-  // Re-render plist so keep_awake changes take effect.
-  installDaemon(home);
+export function installDaemon(
+  home: string,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  assertResponderDaemonSupported(platform);
+  if (platform === "win32") {
+    const root = packageRoot();
+    const daemonEntry = path.join(root, "daemon/dist/index.js");
+    const configPath = path.join(home, ".doucopy/config.json");
+    if (existsSync(configPath)) {
+      try {
+        chmodSync(configPath, 0o600);
+      } catch {
+        // Windows may ignore mode bits.
+      }
+    }
+    installWindowsDaemon(home, process.execPath, daemonEntry);
+    return;
+  }
+  installLaunchdDaemon(home);
 }
 
-export function stopDaemon(home: string): void {
+export function startDaemon(
+  home: string,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  // Re-render supervisor config so keep_awake / path changes take effect.
+  installDaemon(home, platform);
+}
+
+export function stopDaemon(
+  home: string,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (!responderDaemonSupported(platform)) return;
+  if (platform === "win32") {
+    stopWindowsDaemon();
+    return;
+  }
   const dst = plistDestination(home);
   spawnSync("launchctl", ["unload", dst], { stdio: "ignore" });
   spawnSync("launchctl", ["bootout", `gui/${process.getuid?.() ?? 0}/${LABEL}`], { stdio: "ignore" });
 }
 
-export function isDaemonRunning(): boolean {
+export function isDaemonRunning(
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (!responderDaemonSupported(platform)) return false;
+  if (platform === "win32") return isWindowsDaemonRunning();
   const out = spawnSync("launchctl", ["list"], { encoding: "utf8" });
   return out.stdout?.split("\n").some((line) => line.includes(LABEL)) ?? false;
 }

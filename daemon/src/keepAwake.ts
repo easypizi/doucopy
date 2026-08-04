@@ -11,6 +11,7 @@ import {
 
 export const KEEP_AWAKE_STATE_FILE = "~/.doucopy/keep_awake_state.json";
 export const LAUNCHD_LABEL = "com.doucopy.responder";
+export const WINDOWS_TASK_NAME = "doucopy-responder";
 
 export interface KeepAwakeState {
   /** ISO time of last explicit or implicit confirmation. */
@@ -22,24 +23,32 @@ export interface KeepAwakeState {
 
 export type ConfirmChoice = "keep" | "stop" | "unavailable";
 
+export type PowerShellRunner = (script: string) => { status: number | null; stdout: string; stderr: string };
+export type SchtasksRunner = (args: string[]) => { status: number | null; stdout: string; stderr: string };
+
 export interface KeepAwakeDeps {
   now?: () => number;
   readState?: () => KeepAwakeState | null;
   writeState?: (state: KeepAwakeState) => void;
   askConfirm?: () => Promise<ConfirmChoice>;
-  /** Cancel a hung askConfirm (e.g. kill osascript). */
+  /** Cancel a hung askConfirm (e.g. kill osascript / powershell). */
   cancelAsk?: () => void;
   /** Wait helper for grace race. Defaults to setTimeout. */
   waitMs?: (ms: number) => Promise<void>;
   stopDaemon?: () => void;
+  /** Refresh OS sleep prevention (Windows SetThreadExecutionState). */
+  stayAwake?: () => void;
   log?: (msg: string) => void;
   tickMs?: number;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_TICK_MS = 60_000;
+/** ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED */
+const WINDOWS_ES_FLAGS = "0x80000041";
 
 let activeOsascript: ChildProcess | null = null;
+let activePowershell: ChildProcess | null = null;
 
 export function statePath(home = homedir()): string {
   return path.join(home, ".doucopy", "keep_awake_state.json");
@@ -67,6 +76,131 @@ export function cancelOsascriptConfirm(): void {
     // ignore
   }
   activeOsascript = null;
+}
+
+export function cancelMessageBoxConfirm(): void {
+  if (!activePowershell) return;
+  try {
+    activePowershell.kill("SIGTERM");
+  } catch {
+    // ignore
+  }
+  activePowershell = null;
+}
+
+function defaultPowershell(script: string): { status: number | null; stdout: string; stderr: string } {
+  const out = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+    { encoding: "utf8" },
+  );
+  return { status: out.status, stdout: out.stdout ?? "", stderr: out.stderr ?? "" };
+}
+
+function defaultSchtasks(args: string[]): { status: number | null; stdout: string; stderr: string } {
+  const out = spawnSync("schtasks.exe", args, { encoding: "utf8" });
+  return { status: out.status, stdout: out.stdout ?? "", stderr: out.stderr ?? "" };
+}
+
+export function parseMessageBoxChoice(stdout: string): ConfirmChoice {
+  const text = stdout.trim().toLowerCase();
+  if (!text) return "unavailable";
+  if (text.includes("stop") || text === "no") return "stop";
+  if (text.includes("keep") || text === "yes" || text === "cancel") return "keep";
+  return "unavailable";
+}
+
+/** Prevent idle sleep on Windows while the responder runs. */
+export function applyWindowsStayAwake(run: PowerShellRunner = defaultPowershell): boolean {
+  const script = [
+    "Add-Type -TypeDefinition @'",
+    "using System;",
+    "using System.Runtime.InteropServices;",
+    "public class DoucopyPower {",
+    "  [DllImport(\"kernel32.dll\")]",
+    "  public static extern uint SetThreadExecutionState(uint esFlags);",
+    "}",
+    "'@",
+    `[void][DoucopyPower]::SetThreadExecutionState(${WINDOWS_ES_FLAGS})`,
+  ].join("\n");
+  const out = run(script);
+  return out.status === 0;
+}
+
+export function stopWindowsScheduledTask(run: SchtasksRunner = defaultSchtasks): void {
+  run(["/End", "/TN", WINDOWS_TASK_NAME]);
+  run(["/Delete", "/TN", WINDOWS_TASK_NAME, "/F"]);
+}
+
+/**
+ * Windows GUI dialog via WinForms MessageBox.
+ * Yes → keep, No → stop, Cancel/X → keep (parity with osascript Esc).
+ * Spawn failure → unavailable.
+ */
+export function askConfirmViaMessageBox(): Promise<ConfirmChoice> {
+  return new Promise((resolve) => {
+    const script = [
+      "Add-Type -AssemblyName System.Windows.Forms",
+      "$r = [System.Windows.Forms.MessageBox]::Show(",
+      "  'doucopy is keeping this PC awake so your peer can reach you.`n`nKeep the responder running?',",
+      "  'doucopy',",
+      "  [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,",
+      "  [System.Windows.Forms.MessageBoxIcon]::Question,",
+      "  [System.Windows.Forms.MessageBoxDefaultButton]::Button1",
+      ")",
+      "if ($r -eq [System.Windows.Forms.DialogResult]::Yes) { 'keep' }",
+      "elseif ($r -eq [System.Windows.Forms.DialogResult]::No) { 'stop' }",
+      "else { 'keep' }",
+    ].join("; ");
+    const proc = spawn(
+      "powershell.exe",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    activePowershell = proc;
+    let stdout = "";
+    let settled = false;
+    const finish = (choice: ConfirmChoice) => {
+      if (settled) return;
+      settled = true;
+      if (activePowershell === proc) activePowershell = null;
+      resolve(choice);
+    };
+    proc.stdout.on("data", (c: Buffer) => {
+      stdout += c.toString("utf8");
+    });
+    proc.on("error", () => finish("unavailable"));
+    proc.on("close", (code, signal) => {
+      if (signal) {
+        finish("unavailable");
+        return;
+      }
+      if (code !== 0) {
+        finish("keep");
+        return;
+      }
+      finish(parseMessageBoxChoice(stdout));
+    });
+  });
+}
+
+function defaultAskConfirm(): Promise<ConfirmChoice> {
+  if (process.platform === "win32") return askConfirmViaMessageBox();
+  return askConfirmViaOsascript();
+}
+
+function defaultCancelAsk(): void {
+  if (process.platform === "win32") cancelMessageBoxConfirm();
+  else cancelOsascriptConfirm();
+}
+
+function defaultStopDaemon(): void {
+  if (process.platform === "win32") stopWindowsScheduledTask();
+  else stopLaunchdDaemon();
+}
+
+function defaultStayAwake(): void {
+  if (process.platform === "win32") applyWindowsStayAwake();
 }
 
 /**
@@ -189,11 +323,14 @@ export async function keepAwakeTick(
   const nowMs = now();
   const readState = deps.readState ?? defaultReadState;
   const writeState = deps.writeState ?? defaultWriteState;
-  const askConfirm = deps.askConfirm ?? askConfirmViaOsascript;
-  const cancelAsk = deps.cancelAsk ?? cancelOsascriptConfirm;
+  const askConfirm = deps.askConfirm ?? defaultAskConfirm;
+  const cancelAsk = deps.cancelAsk ?? defaultCancelAsk;
   const waitMs = deps.waitMs ?? defaultWaitMs;
-  const stopDaemon = deps.stopDaemon ?? stopLaunchdDaemon;
+  const stopDaemon = deps.stopDaemon ?? defaultStopDaemon;
+  const stayAwake = deps.stayAwake ?? defaultStayAwake;
   const log = deps.log ?? ((msg: string) => console.error(msg));
+
+  stayAwake();
 
   let state = ensureInitialConfirmation(readState(), nowMs);
   writeState(state);
@@ -254,12 +391,20 @@ export function startKeepAwakeSupervisor(
 ): void {
   const settings = resolveKeepAwake(config.keep_awake);
   if (!settings.enabled) {
-    (deps.log ?? console.error)("keep_awake: disabled (Mac may idle-sleep)");
+    (deps.log ?? console.error)("keep_awake: disabled (machine may idle-sleep)");
     return;
   }
   (deps.log ?? console.error)(
     `keep_awake: enabled (confirm every ${settings.confirm_days}d, grace ${settings.confirm_grace_hours}h)`,
   );
+
+  const platformDeps: KeepAwakeDeps = {
+    ...deps,
+    askConfirm: deps.askConfirm ?? defaultAskConfirm,
+    cancelAsk: deps.cancelAsk ?? defaultCancelAsk,
+    stopDaemon: deps.stopDaemon ?? defaultStopDaemon,
+    stayAwake: deps.stayAwake ?? defaultStayAwake,
+  };
 
   const tickMs = deps.tickMs ?? DEFAULT_TICK_MS;
   let running = false;
@@ -267,7 +412,7 @@ export function startKeepAwakeSupervisor(
     if (running || signal.aborted) return;
     running = true;
     try {
-      const result = await keepAwakeTick(settings, deps);
+      const result = await keepAwakeTick(settings, platformDeps);
       if (result === "stop" && !signal.aborted) {
         process.kill(process.pid, "SIGTERM");
       }

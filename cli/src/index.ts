@@ -5,7 +5,7 @@ import { runChat } from "./chat.js";
 import { shellExec } from "./exec.js";
 import { runInvite } from "./invite.js";
 import { runJoin } from "./join.js";
-import { startDaemon, stopDaemon } from "./launchd.js";
+import { RESPONDER_DAEMON_UNSUPPORTED, responderDaemonSupported, startDaemon, stopDaemon } from "./launchd.js";
 import { runLogs } from "./logs.js";
 import { migrateLegacyHome } from "./migrate.js";
 import { runDeploy, runHealth, runRevoke, runSecretRotate, runUnrevoke } from "./ops.js";
@@ -109,12 +109,15 @@ async function main(): Promise<void> {
       await runStatus();
       return;
     case "start":
+      if (!responderDaemonSupported()) throw new Error(RESPONDER_DAEMON_UNSUPPORTED);
       startDaemon(home);
       return;
     case "stop":
+      if (!responderDaemonSupported()) throw new Error(RESPONDER_DAEMON_UNSUPPORTED);
       stopDaemon(home);
       return;
     case "restart":
+      if (!responderDaemonSupported()) throw new Error(RESPONDER_DAEMON_UNSUPPORTED);
       stopDaemon(home);
       startDaemon(home);
       return;

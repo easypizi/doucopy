@@ -1,6 +1,6 @@
 ---
 name: doucopy-setup
-description: "Use when joining a new machine to a doucopy deployment, when the ask_peer MCP tool doesn't appear in Cursor, or when a peer needs to be added to a relay. Covers doucopy join, doucopy settings, invite generation, launchd install (com.doucopy.responder), MCP merge into ~/.cursor/mcp.json, and post-install verification."
+description: "Use when joining a new machine to a doucopy deployment, when the ask_peer MCP tool doesn't appear in Cursor, or when a peer needs to be added to a relay. Covers doucopy join, doucopy settings, invite generation, responder install (launchd on macOS / Task Scheduler on Windows), MCP merge into ~/.cursor/mcp.json, and post-install verification."
 ---
 
 # doucopy: machine setup (v2)
@@ -31,7 +31,7 @@ npx doucopy join <relay-url> <invite>
   - `~/.claude.json`,
   - `~/.codex/config.toml` (as `[mcp_servers.doucopy]` with `url` + `http_headers` Authorization. Codex >= 0.146 rejects `bearer_token` on streamable HTTP),
   each with a `.bak` backup,
-- installs the launchd responder at `~/Library/LaunchAgents/com.doucopy.responder.plist`,
+- installs the responder supervisor: launchd plist on macOS (`~/Library/LaunchAgents/com.doucopy.responder.plist`), or Task Scheduler task `doucopy-responder` on Windows (`~/.doucopy/responder.cmd` + `responder.task.xml`),
 - polls the relay `/status` endpoint until the daemon reports online.
 
 A machine that still has `~/.agent-link` from before the rename gets it moved to `~/.doucopy` automatically on the next `doucopy` command (see `migrateLegacyHome` in `doucopy-dev`).
@@ -55,7 +55,9 @@ Sectioned menu: Restrictions, Filtering (`policy.md` + redact literals), Model, 
 
 ```bash
 doucopy stop
+# macOS:
 rm ~/Library/LaunchAgents/com.doucopy.responder.plist
+# Windows also removes the Task Scheduler task via doucopy stop
 ```
 
 `~/.doucopy/` stays. Delete it by hand for a clean slate.

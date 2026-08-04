@@ -168,6 +168,32 @@ export function detectAskers(home: string): DetectedAskers {
   };
 }
 
+export interface BinaryOnPathOptions {
+  pathEnv?: string;
+  platform?: NodeJS.Platform;
+  pathSep?: string;
+  exists?: (candidate: string) => boolean;
+}
+
+/** Walk PATH for a binary. On win32 also checks .exe/.cmd/.bat/.ps1. */
+export function binaryOnPath(binary: string, opts: BinaryOnPathOptions = {}): boolean {
+  const platform = opts.platform ?? process.platform;
+  const pathEnv = opts.pathEnv ?? process.env.PATH ?? "";
+  const pathSep = opts.pathSep ?? path.delimiter;
+  const exists = opts.exists ?? existsSync;
+  const names =
+    platform === "win32"
+      ? [binary, `${binary}.exe`, `${binary}.cmd`, `${binary}.bat`, `${binary}.ps1`]
+      : [binary];
+  for (const dir of pathEnv.split(pathSep)) {
+    if (!dir) continue;
+    for (const name of names) {
+      if (exists(path.join(dir, name))) return true;
+    }
+  }
+  return false;
+}
+
 export function detectResponders(): DetectedResponders {
   return {
     cursor: which("cursor-agent"),
@@ -186,7 +212,25 @@ export function detectHarnesses(home: string): DetectedHarnesses {
   };
 }
 
+/** Why a responder harness choice should be disabled in Setup/Settings UI. */
+export function responderHarnessDisabledReason(
+  present: boolean,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
+  if (platform !== "darwin" && platform !== "win32") {
+    return "(responder daemon unsupported on this OS)";
+  }
+  if (!present) return "(not found on PATH)";
+  return undefined;
+}
+
 function which(binary: string): boolean {
+  if (binaryOnPath(binary)) return true;
+  // Fallback for unusual installs (symlinks, functions) on Unix.
+  if (process.platform === "win32") {
+    const res = spawnSync("where.exe", [binary], { stdio: "ignore" });
+    return res.status === 0;
+  }
   const res = spawnSync("command", ["-v", binary], { shell: "/bin/bash", stdio: "ignore" });
   return res.status === 0;
 }

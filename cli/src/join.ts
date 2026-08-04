@@ -4,7 +4,7 @@ import { hostname, homedir, userInfo } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { fetchStatus, joinRelay, normalizeRelayUrl } from "./api.js";
-import { installDaemon } from "./launchd.js";
+import { installDaemon, responderDaemonSupported } from "./launchd.js";
 import { areAllSkillsInstalled, installGlobalSkills, type SkillsClient } from "./skills.js";
 import {
   applyRestrictions,
@@ -22,6 +22,7 @@ import {
   mergeClaudeMcp,
   mergeCodexToml,
   mergeMcpJson,
+  responderHarnessDisabledReason,
   writeConfig,
   writeDefaultPolicy,
   type DetectedResponders,
@@ -205,11 +206,11 @@ export function clearDraft(home: string): void {
 }
 
 function responderChoices(detected: DetectedResponders): { value: ResponderChoice; name: string; disabled?: string | false }[] {
-  const asDetected = (present: boolean) => (present ? undefined : "(not found on PATH)");
+  const disabledFor = (present: boolean) => responderHarnessDisabledReason(present) ?? false;
   return [
-    { value: "cursor-agent", name: "cursor-agent", disabled: asDetected(detected.cursor) },
-    { value: "claude", name: "claude", disabled: asDetected(detected.claude) },
-    { value: "codex", name: "codex", disabled: asDetected(detected.codex) },
+    { value: "cursor-agent", name: "cursor-agent", disabled: disabledFor(detected.cursor) },
+    { value: "claude", name: "claude", disabled: disabledFor(detected.claude) },
+    { value: "codex", name: "codex", disabled: disabledFor(detected.codex) },
     { value: "asker-only", name: "asker-only (do not answer, just ask others)" },
   ];
 }
@@ -279,8 +280,16 @@ async function askAskers(flag: Client[] | undefined, detected: ReturnType<typeof
 }
 
 async function askResponder(flag: ResponderChoice | undefined, detected: DetectedResponders, interactive: boolean): Promise<ResponderChoice> {
-  if (flag) return flag;
+  if (flag) {
+    if (flag !== "asker-only" && !responderDaemonSupported()) {
+      throw new Error(
+        "responder daemon is only supported on macOS and Windows; use --harness asker-only or --asker-only",
+      );
+    }
+    return flag;
+  }
   if (!interactive) {
+    if (!responderDaemonSupported()) return "asker-only";
     if (detected.cursor) return "cursor-agent";
     if (detected.claude) return "claude";
     if (detected.codex) return "codex";
@@ -289,7 +298,16 @@ async function askResponder(flag: ResponderChoice | undefined, detected: Detecte
   return select<ResponderChoice>({
     message: "Which harness should answer questions from other peers?",
     choices: responderChoices(detected),
-    default: detected.cursor ? "cursor-agent" : detected.claude ? "claude" : detected.codex ? "codex" : "asker-only",
+    default:
+      !responderDaemonSupported()
+        ? "asker-only"
+        : detected.cursor
+          ? "cursor-agent"
+          : detected.claude
+            ? "claude"
+            : detected.codex
+              ? "codex"
+              : "asker-only",
   });
 }
 
@@ -528,7 +546,23 @@ export async function finalizeJoin(home: string, input: JoinFinalizeInput): Prom
 
   if (askerOnly) {
     clearDraft(home);
-    messages.push("asker-only mode: responder daemon not installed");
+    if (!responderDaemonSupported()) {
+      messages.push(
+        "asker-only mode: responder daemon is only supported on macOS and Windows",
+      );
+    } else {
+      messages.push("asker-only mode: responder daemon not installed");
+    }
+    messages.push("restart your coding agent (Cursor / Claude Code / Codex) so it picks up the doucopy MCP server");
+    messages.push('run "doucopy chat" to start asking peers');
+    return { ok: true, messages, errors };
+  }
+
+  if (!responderDaemonSupported()) {
+    clearDraft(home);
+    messages.push(
+      "responder daemon is only supported on macOS and Windows; skipping daemon install",
+    );
     messages.push("restart your coding agent (Cursor / Claude Code / Codex) so it picks up the doucopy MCP server");
     messages.push('run "doucopy chat" to start asking peers');
     return { ok: true, messages, errors };

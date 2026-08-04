@@ -38,7 +38,7 @@ export const DEFAULT_RESTRICTIONS: ResolvedRestrictions = {
 };
 
 export interface KeepAwakeConfig {
-  /** Prevent idle sleep while the responder daemon runs (via caffeinate). Default true. */
+  /** Prevent idle sleep while the responder daemon runs (caffeinate / SetThreadExecutionState). Default true. */
   enabled?: boolean;
   /** Ask every N days whether to keep the daemon. 0 = never ask. Default 3. */
   confirm_days?: number;

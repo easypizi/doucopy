@@ -44,7 +44,8 @@ cli/                  doucopy CLI (bin aliases: doucopy, agent-link)
     join.ts           end-to-end machine setup (+ finalizeJoin for TUI)
     invite.ts         invite (server-side or --secret bootstrap)
     status.ts         daemon + relay status
-    launchd.ts        install / start / stop / detect the launchd daemon, legacy daemon teardown
+    launchd.ts        install / start / stop / detect responder (launchd on macOS, Task Scheduler on Windows)
+    windows-task.ts   Windows schtasks XML + responder.cmd helpers
     logs.ts           tail responder logs
     migrate.ts        one-time ~/.agent-link → ~/.doucopy home migration
     relay.ts          run the relay via npx doucopy relay
@@ -69,7 +70,7 @@ docs/                 local specs/plans/checklist (gitignored)
 11. **`buildPermissions` invariants** (`daemon/src/permissions.ts`): deny wins over allow in Cursor and Claude rule evaluation. Built-in read denials always include `~/.ssh`, `~/.aws`, plus targeted `~/.doucopy` secrets/sibling workspaces (never a blanket `~/.doucopy/**`, that would block `task.md` in the active workspace). Missing `restrictions` means workspace-only writes and shell off. Do not put a blanket `Write(**)` deny under Cursor `--force`, it would also block the workspace because deny wins. Codex only gets a coarse `--sandbox` mapping. Cursor runner **must** `spawn` with `cwd: workspaceDir` so `<workspace>/.cursor/cli.json` is loaded. Without that cwd, project denies are ignored and `--force` allows outside writes.
 12. **`memory_sources.transcripts_glob`** may be a `string` or `string[]`. `loadConfig` normalizes to a non-empty `string[]` (expandHome on each). Default join detection adds Cursor / Claude Code / Codex globs when their home dirs exist. Do not hardcode Cursor-only paths in new defaults.
 13. **Responder model is harness-scoped.** Settings presets live in `cli/src/settings.ts` (`MODEL_PRESETS`). `defaultConfig` does not set `model`. Join sets `composer-2.5` only for `cursor-agent`. Switching harness in settings must not leave a foreign model id in place.
-14. **Keep awake.** Default `keep_awake.enabled=true` wraps the launchd program in `/usr/bin/caffeinate -dims` so idle sleep cannot freeze the poller. Periodic confirm (`confirm_days`, default 3) is enforced inside the daemon (`keepAwake.ts`). Decline or grace timeout unloads launchd. `confirm_days: 0` disables prompts. Re-install plist via `doucopy restart` / `installDaemon` after changing `keep_awake.enabled`.
+14. **Keep awake.** Default `keep_awake.enabled=true`. On macOS, launchd wraps the program in `/usr/bin/caffeinate -dims`. On Windows, the daemon calls `SetThreadExecutionState` and the CLI registers Task Scheduler task `doucopy-responder`. Periodic confirm (`confirm_days`, default 3) is enforced inside the daemon (`keepAwake.ts`) via osascript (macOS) or MessageBox (Windows). Decline or grace timeout unloads the supervisor. `confirm_days: 0` disables prompts. Re-install via `doucopy restart` / `installDaemon` after changing `keep_awake.enabled`. Linux remains asker-only (no responder supervisor).
 
 ## Test map
 

@@ -23,7 +23,7 @@ import {
   WRITE_ALLOW_PRESETS,
   type RestrictionsSettings,
 } from "../../settings.js";
-import { detectAskers, detectResponders } from "../../setup.js";
+import { detectAskers, detectResponders, responderHarnessDisabledReason } from "../../setup.js";
 import { areAllSkillsInstalled } from "../../skills.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { FooterHints } from "../components/FooterHints.js";
@@ -393,13 +393,21 @@ export function SetupScreen({
 
   if (phase.kind === "responder") {
     const detected = detectResponders();
+    const option = (value: Exclude<JoinResponderChoice, "asker-only">, present: boolean) => {
+      const reason = responderHarnessDisabledReason(present);
+      return {
+        value,
+        label: reason ? `${value} ${reason}` : value,
+        disabled: Boolean(reason),
+      };
+    };
     return (
       <SelectModal
         title="Responder harness"
         options={[
-          { value: "cursor-agent", label: "cursor-agent", disabled: !detected.cursor },
-          { value: "claude", label: "claude", disabled: !detected.claude },
-          { value: "codex", label: "codex", disabled: !detected.codex },
+          option("cursor-agent", detected.cursor),
+          option("claude", detected.claude),
+          option("codex", detected.codex),
           { value: "asker-only", label: "asker-only" },
         ]}
         onCancel={() => setPhase({ kind: "askers" })}

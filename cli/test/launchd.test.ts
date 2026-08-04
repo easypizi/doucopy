@@ -4,12 +4,41 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  RESPONDER_DAEMON_UNSUPPORTED,
+  installDaemon,
+  isDaemonRunning,
   programArgumentsXml,
   readKeepAwakeEnabled,
   renderPlist,
+  responderDaemonSupported,
+  stopDaemon,
 } from "../src/launchd.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+
+describe("responderDaemonSupported", () => {
+  it("is true on darwin and win32", () => {
+    expect(responderDaemonSupported("darwin")).toBe(true);
+    expect(responderDaemonSupported("win32")).toBe(true);
+    expect(responderDaemonSupported("linux")).toBe(false);
+  });
+});
+
+describe("unsupported platform daemon guards", () => {
+  it("installDaemon refuses on linux with a clear unsupported error", () => {
+    const home = mkdtempSync(path.join(tmpdir(), "doucopy-daemon-"));
+    expect(() => installDaemon(home, "linux")).toThrow(RESPONDER_DAEMON_UNSUPPORTED);
+  });
+
+  it("isDaemonRunning is false on linux", () => {
+    expect(isDaemonRunning("linux")).toBe(false);
+  });
+
+  it("stopDaemon is a no-op on linux", () => {
+    const home = mkdtempSync(path.join(tmpdir(), "doucopy-daemon-"));
+    expect(() => stopDaemon(home, "linux")).not.toThrow();
+  });
+});
 
 describe("launchd keep_awake plist", () => {
   it("wraps node with caffeinate when keep_awake is on", () => {

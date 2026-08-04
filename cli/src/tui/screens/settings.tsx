@@ -1,7 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import { homedir } from "node:os";
 import { useMemo, useRef, useState } from "react";
-import { startDaemon, stopDaemon } from "../../launchd.js";
+import { RESPONDER_DAEMON_UNSUPPORTED, responderDaemonSupported, startDaemon, stopDaemon } from "../../launchd.js";
 import {
   READ_DENY_PRESETS,
   REDACT_LITERAL_PRESETS,
@@ -26,7 +26,7 @@ import {
   type ShellMode,
 } from "../../settings.js";
 import { runPolicy } from "../../policy.js";
-import { detectResponders, writeConfig, type HarnessKind } from "../../setup.js";
+import { detectResponders, responderHarnessDisabledReason, writeConfig, type HarnessKind } from "../../setup.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { FooterHints } from "../components/FooterHints.js";
 import { ListEditor } from "../components/ListEditor.js";
@@ -183,12 +183,16 @@ export function SettingsScreen({
     setBaseline(JSON.stringify(current));
     setMessage(`wrote ${home}/.doucopy/config.json`);
     if (doRestart) {
-      try {
-        stopDaemon(home);
-        startDaemon(home);
-        setMessage("saved and daemon restarted");
-      } catch (err) {
-        setMessage(`saved, but restart failed: ${err instanceof Error ? err.message : String(err)}`);
+      if (!responderDaemonSupported()) {
+        setMessage(`saved (${RESPONDER_DAEMON_UNSUPPORTED})`);
+      } else {
+        try {
+          stopDaemon(home);
+          startDaemon(home);
+          setMessage("saved and daemon restarted");
+        } catch (err) {
+          setMessage(`saved, but restart failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
     }
     onSaved?.();
@@ -372,13 +376,21 @@ export function SettingsScreen({
     }
     if (field === "harness") {
       const detected = detectResponders();
+      const option = (value: HarnessKind, present: boolean) => {
+        const reason = responderHarnessDisabledReason(present);
+        return {
+          value,
+          label: reason ? `${value} ${reason}` : value,
+          disabled: Boolean(reason),
+        };
+      };
       return (
         <SelectModal
           title="Harness"
           options={[
-            { value: "cursor-agent", label: "cursor-agent", disabled: !detected.cursor },
-            { value: "claude", label: "claude", disabled: !detected.claude },
-            { value: "codex", label: "codex", disabled: !detected.codex },
+            option("cursor-agent", detected.cursor),
+            option("claude", detected.claude),
+            option("codex", detected.codex),
           ]}
           initial={(draft.responder?.harness ?? "cursor-agent") as HarnessKind}
           onCancel={() => setEditor({ kind: "none" })}

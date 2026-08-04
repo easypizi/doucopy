@@ -6,9 +6,9 @@ doucopy assumes a **trusted circle** of invited peers and an **untrusted questio
 
 ## Operational limits
 
-- **Responder daemon is macOS-only** (`launchd`). Linux machines can join as askers.
+- **Responder daemon runs on macOS and Windows.** macOS uses `launchd`. Windows uses Task Scheduler (`schtasks`, task name `doucopy-responder`). Linux can join as asker-only. On unsupported OS, Setup only offers `asker-only`, and `doucopy start` refuses with a clear message.
 - **Stopped daemon = no live answers.** A valid token still authenticates to the relay, but nothing runs the harness until the daemon long-polls again. Questions may queue (`peer_offline`) for up to 24h.
-- **Keep awake (default on).** While the responder daemon runs, launchd wraps it in `caffeinate` so the Mac does not idle-sleep and peers can still reach you. Every 3 days (configurable) macOS asks whether to keep it. **Keep** or Esc/Cancel resets the timer. **Stop** unloads the daemon. If the dialog never appears (SSH / no GUI) or you ignore it past the grace window, the daemon stops. Configure via `npx doucopy settings` → Keep awake, or `keep_awake` in `~/.doucopy/config.json`. True power-off still means offline.
+- **Keep awake (default on).** While the responder daemon runs, macOS wraps it in `caffeinate` and Windows calls `SetThreadExecutionState` so idle sleep does not freeze the poller. Every 3 days (configurable) the OS asks whether to keep it (osascript on macOS, MessageBox on Windows). **Keep** or Esc/Cancel resets the timer. **Stop** unloads the supervisor. If the dialog never appears (SSH / no GUI) or you ignore it past the grace window, the daemon stops. Configure via `npx doucopy settings` → Keep awake, or `keep_awake` in `~/.doucopy/config.json`. True power-off still means offline.
 - **Relay restart drops in-flight questions.** All relay state (open tickets, presence) lives in memory. Queued questions survive for 24h only while the relay is up.
 - **No horizontal scaling.** One relay instance by design. Fine for a personal circle, not for a SaaS.
 - **Cursor write lockdown is permissions-based**, not a full OS sandbox. Default deny targets common home folders. Prove with the live smoke (`make live-smoke-cursor`) before trusting a release.

@@ -6,6 +6,7 @@ import {
   CLAUDE_TRANSCRIPTS_GLOB,
   CODEX_TRANSCRIPTS_GLOB,
   CURSOR_TRANSCRIPTS_GLOB,
+  binaryOnPath,
   defaultConfig,
   detectAskers,
   detectHarnesses,
@@ -15,6 +16,7 @@ import {
   mergeCodexToml,
   mergeMcpJson,
   replaceDoucopyMcpSection,
+  responderHarnessDisabledReason,
   writeConfig,
   writeDefaultPolicy,
 } from "../src/setup.js";
@@ -261,6 +263,65 @@ describe("mergeCodexToml", () => {
     expect(contents).toContain("[mcp_servers.doucopy]");
     expect(contents).toContain('url = "https://new.example.com/mcp"');
     expect(contents).toContain("[mcp_servers.other]");
+  });
+});
+
+describe("binaryOnPath", () => {
+  it("finds a unix binary by walking PATH", () => {
+    const home = makeHome();
+    const bin = path.join(home, "bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(path.join(bin, "cursor-agent"), "#!/bin/sh\n");
+    expect(
+      binaryOnPath("cursor-agent", {
+        pathEnv: bin,
+        platform: "darwin",
+        pathSep: ":",
+      }),
+    ).toBe(true);
+  });
+
+  it("finds a Windows binary with .exe / .cmd suffixes", () => {
+    const home = makeHome();
+    const bin = path.join(home, "bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(path.join(bin, "cursor-agent.cmd"), "@echo off\n");
+    expect(
+      binaryOnPath("cursor-agent", {
+        pathEnv: bin,
+        platform: "win32",
+        pathSep: ";",
+      }),
+    ).toBe(true);
+  });
+
+  it("returns false when the binary is absent", () => {
+    const home = makeHome();
+    expect(
+      binaryOnPath("cursor-agent", {
+        pathEnv: home,
+        platform: "win32",
+        pathSep: ";",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("responderHarnessDisabledReason", () => {
+  it("allows harness selection on darwin and win32 when the binary is present", () => {
+    expect(responderHarnessDisabledReason(true, "darwin")).toBeUndefined();
+    expect(responderHarnessDisabledReason(true, "win32")).toBeUndefined();
+  });
+
+  it("reports unsupported OS on linux even when the binary is present", () => {
+    expect(responderHarnessDisabledReason(true, "linux")).toBe(
+      "(responder daemon unsupported on this OS)",
+    );
+  });
+
+  it("reports missing PATH binary on supported platforms", () => {
+    expect(responderHarnessDisabledReason(false, "darwin")).toBe("(not found on PATH)");
+    expect(responderHarnessDisabledReason(false, "win32")).toBe("(not found on PATH)");
   });
 });
 

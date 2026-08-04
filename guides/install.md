@@ -69,7 +69,7 @@ npx doucopy join <relay-url> <invite> \
 
 - Node.js 22.x on the machine.
 - An invite code from someone already in the circle.
-- macOS if this machine should run the responder daemon (`launchd`). Asker-only mode works on Linux too.
+- macOS or Windows if this machine should run the responder daemon (`launchd` / Task Scheduler). Asker-only mode works on Linux too.
 - A local coding-agent CLI on every responder machine: `cursor-agent`, `claude` or `codex`.
 
 If the circle already has a relay, you can stop here and run `npx doucopy join`.

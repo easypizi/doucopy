@@ -3,8 +3,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { detectResponders, writeConfig, type HarnessKind } from "./setup.js";
-import { startDaemon, stopDaemon } from "./launchd.js";
+import { detectResponders, responderHarnessDisabledReason, writeConfig, type HarnessKind } from "./setup.js";
+import { RESPONDER_DAEMON_UNSUPPORTED, responderDaemonSupported, startDaemon, stopDaemon } from "./launchd.js";
 
 export type FsWriteMode = "workspace_only" | "custom";
 export type ShellMode = "off" | "deny_patterns" | "open";
@@ -78,7 +78,7 @@ export function applyKeepAwake(config: DoucopyConfigFile, keepAwake: KeepAwakeSe
 }
 
 export function summarizeKeepAwake(k: KeepAwakeSettings): string {
-  if (!k.enabled) return "off (Mac may idle-sleep)";
+  if (!k.enabled) return "off (machine may idle-sleep)";
   if (k.confirm_days <= 0) return "on, no periodic confirm";
   return `on, confirm every ${k.confirm_days}d (grace ${k.confirm_grace_hours}h)`;
 }
@@ -560,12 +560,13 @@ export async function runSettings(home: string = homedir()): Promise<void> {
     if (section === "harness") {
       const detected = detectResponders();
       const previous = config.responder?.harness ?? "cursor-agent";
+      const disabledFor = (present: boolean) => responderHarnessDisabledReason(present) ?? false;
       const harness = await select<HarnessKind>({
         message: "Responder harness",
         choices: [
-          { value: "cursor-agent", name: "cursor-agent", disabled: detected.cursor ? false : "(not found on PATH)" },
-          { value: "claude", name: "claude", disabled: detected.claude ? false : "(not found on PATH)" },
-          { value: "codex", name: "codex", disabled: detected.codex ? false : "(not found on PATH)" },
+          { value: "cursor-agent", name: "cursor-agent", disabled: disabledFor(detected.cursor) },
+          { value: "claude", name: "claude", disabled: disabledFor(detected.claude) },
+          { value: "codex", name: "codex", disabled: disabledFor(detected.codex) },
         ],
         default: previous,
       });
@@ -626,22 +627,26 @@ export async function runSettings(home: string = homedir()): Promise<void> {
   }
 
   if (dirty && process.stdin.isTTY) {
-    const restart = await confirm({
-      message: "Restart the responder daemon now so changes take effect?",
-      default: true,
-    });
-    if (restart) {
-      try {
-        stopDaemon(home);
-        startDaemon(home);
-        console.log("daemon restarted");
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(`could not restart daemon: ${message}`);
-        console.log('run "doucopy restart" manually');
-      }
+    if (!responderDaemonSupported()) {
+      console.log(RESPONDER_DAEMON_UNSUPPORTED);
     } else {
-      console.log('run "doucopy restart" when you want the daemon to reload config');
+      const restart = await confirm({
+        message: "Restart the responder daemon now so changes take effect?",
+        default: true,
+      });
+      if (restart) {
+        try {
+          stopDaemon(home);
+          startDaemon(home);
+          console.log("daemon restarted");
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error(`could not restart daemon: ${message}`);
+          console.log('run "doucopy restart" manually');
+        }
+      } else {
+        console.log('run "doucopy restart" when you want the daemon to reload config');
+      }
     }
   }
 }
