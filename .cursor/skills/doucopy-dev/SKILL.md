@@ -46,6 +46,8 @@ cli/                  doucopy CLI (bin aliases: doucopy, agent-link)
     status.ts         daemon + relay status
     launchd.ts        install / start / stop / detect responder (launchd on macOS, Task Scheduler on Windows)
     windows-task.ts   Windows schtasks XML + responder.cmd helpers
+    harness-install.ts probe/install/login for cursor/claude/codex during Setup
+    uninstall.ts      doucopy uninstall [--purge]
     logs.ts           tail responder logs
     migrate.ts        one-time ~/.agent-link → ~/.doucopy home migration
     relay.ts          run the relay via npx doucopy relay

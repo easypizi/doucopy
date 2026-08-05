@@ -196,7 +196,7 @@ export function binaryOnPath(binary: string, opts: BinaryOnPathOptions = {}): bo
 
 export function detectResponders(): DetectedResponders {
   return {
-    cursor: which("cursor-agent"),
+    cursor: which("cursor-agent") || which("agent"),
     claude: which("claude"),
     codex: which("codex"),
   };
@@ -283,6 +283,47 @@ export function mergeClaudeMcp(home: string, relayUrl: string, token: string): s
   const file = path.join(home, ".claude.json");
   writeMcpJson(file, relayUrl, token, true);
   return file;
+}
+
+function stripMcpJsonServers(file: string, strictParse: boolean): boolean {
+  if (!existsSync(file)) return false;
+  const raw = readFileSync(file, "utf8");
+  let data: { mcpServers?: Record<string, unknown> };
+  try {
+    data = JSON.parse(raw) as typeof data;
+  } catch {
+    if (strictParse) return false;
+    return false;
+  }
+  if (!data.mcpServers || typeof data.mcpServers !== "object") return false;
+  const had = "doucopy" in data.mcpServers || "agent-link" in data.mcpServers;
+  if (!had) return false;
+  writeFileSync(`${file}.bak`, raw);
+  delete data.mcpServers["doucopy"];
+  delete data.mcpServers["agent-link"];
+  writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
+  return true;
+}
+
+/** Remove doucopy / agent-link MCP entries from detected client configs. */
+export function removeDoucopyMcpEntries(home: string): string[] {
+  const removed: string[] = [];
+  const cursor = path.join(home, ".cursor", "mcp.json");
+  if (stripMcpJsonServers(cursor, false)) removed.push(cursor);
+  const claude = path.join(home, ".claude.json");
+  if (stripMcpJsonServers(claude, true)) removed.push(claude);
+  const codex = path.join(home, ".codex", "config.toml");
+  if (existsSync(codex)) {
+    const existing = readFileSync(codex, "utf8");
+    const withoutLegacy = replaceDoucopyMcpSection(existing, null, "[mcp_servers.agent-link]");
+    const without = replaceDoucopyMcpSection(withoutLegacy, null, "[mcp_servers.doucopy]");
+    if (without !== existing) {
+      writeFileSync(`${codex}.bak`, existing);
+      writeFileSync(codex, without.endsWith("\n") ? without : `${without}\n`, { mode: 0o600 });
+      removed.push(codex);
+    }
+  }
+  return removed;
 }
 
 /** Escape a value for a double-quoted TOML string. */

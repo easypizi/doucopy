@@ -8,7 +8,7 @@ description: "Use when joining a new machine to a doucopy deployment, when the a
 ## Preconditions
 
 - Node.js 22+.
-- At least one coding-agent CLI installed and logged in: `cursor-agent`, `claude`, or `codex`. Pick which one the responder should spawn during `join`.
+- A coding-agent CLI (`cursor-agent`/`agent`, `claude`, or `codex`). Setup can install and log in if none are ready.
 - Relay URL known. If not, deploy the relay first (see `doucopy-relay`) or run `doucopy deploy --app <name>`.
 - An invite code (`ali1.…`). Generate one either from an existing machine (`doucopy invite --ttl 24`), from the relay operator machine (`doucopy invite --app <name>`, requires Heroku CLI), or with a raw secret (`doucopy invite --secret "$RELAY_SECRET"`).
 
@@ -54,13 +54,12 @@ Sectioned menu: Restrictions, Filtering (`policy.md` + redact literals), Model, 
 ## Uninstall
 
 ```bash
-doucopy stop
-# macOS:
-rm ~/Library/LaunchAgents/com.doucopy.responder.plist
-# Windows also removes the Task Scheduler task via doucopy stop
+doucopy uninstall                 # stop supervisor, leave config/skills/MCP
+doucopy uninstall --purge --yes   # also wipe ~/.doucopy, doucopy-* skills, MCP entries
+npm uninstall -g doucopy          # remove the global npm package
 ```
 
-`~/.doucopy/` stays. Delete it by hand for a clean slate.
+`--purge` does not uninstall cursor/claude/codex and does not revoke the peer on the relay.
 
 ## Common pitfalls
 

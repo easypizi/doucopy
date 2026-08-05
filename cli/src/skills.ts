@@ -99,6 +99,31 @@ export function areAllSkillsInstalled(
 // contents differ from the shipped source. Upgrade scenarios still refresh
 // files, but re-running with the same source is a no-op that reports
 // `unchanged` for every skill so the caller can print an accurate summary.
+/** Remove shipped/legacy doucopy skill directories from cursor and claude skills homes. */
+export function removeGlobalDoucopySkills(home: string): string[] {
+  const removed: string[] = [];
+  const names = [...SHIPPED_SKILLS, ...LEGACY_SKILLS];
+  for (const client of ["cursor", "claude"] as const) {
+    const dst = targetDir(home, client);
+    if (!existsSync(dst)) continue;
+    for (const name of names) {
+      const dir = path.join(dst, name);
+      if (!existsSync(dir)) continue;
+      rmSync(dir, { recursive: true, force: true });
+      removed.push(dir);
+    }
+    // Also wipe any other doucopy-* leftovers.
+    for (const entry of readdirSync(dst)) {
+      if (!entry.startsWith("doucopy-")) continue;
+      const dir = path.join(dst, entry);
+      if (!existsSync(dir)) continue;
+      rmSync(dir, { recursive: true, force: true });
+      if (!removed.includes(dir)) removed.push(dir);
+    }
+  }
+  return removed;
+}
+
 export function installGlobalSkills(opts: InstallSkillsOptions): InstalledSkill[] {
   const source = resolveSourceDir(opts.sourceDir);
   const result: InstalledSkill[] = [];

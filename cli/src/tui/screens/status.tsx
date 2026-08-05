@@ -1,4 +1,6 @@
 import { Box, Text, useInput, useWindowSize } from "ink";
+import { useEffect, useState } from "react";
+import { listInstallCandidates } from "../../harness-install.js";
 import { Panel } from "../components/Panel.js";
 import { theme } from "../theme.js";
 import type { StatusSnapshot } from "../useStatusSnapshot.js";
@@ -23,6 +25,17 @@ export function StatusScreen({
 }) {
   const { columns } = useWindowSize();
   const wide = columns >= 88;
+  const [needHarnessInstall, setNeedHarnessInstall] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listInstallCandidates().then((list) => {
+      if (!cancelled) setNeedHarnessInstall(list.length > 0);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [snap.joined, snap.daemonRunning]);
 
   useInput(
     (input, key) => {
@@ -42,6 +55,15 @@ export function StatusScreen({
       </Panel>
     );
   }
+
+  const harnessBanner = needHarnessInstall ? (
+    <Box marginBottom={1} flexDirection="column">
+      <Text color={theme.warn} bold>
+        No coding-agent CLI ready (missing or not logged in).
+      </Text>
+      <Text color={theme.dim}>Tab to Setup to install/login Cursor, Claude, or Codex.</Text>
+    </Box>
+  ) : null;
 
   const peersPanel = (
     <Panel title="Network" flexGrow={1}>
@@ -109,6 +131,7 @@ export function StatusScreen({
 
   return (
     <Box flexDirection="column" flexGrow={1}>
+      {harnessBanner}
       <Box flexDirection={wide ? "row" : "column"} flexGrow={1}>
         <Box flexGrow={1} marginRight={wide ? 1 : 0} marginBottom={wide ? 0 : 1}>
           {peersPanel}

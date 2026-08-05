@@ -15,6 +15,12 @@ import {
   type RestrictionsSettings,
 } from "./settings.js";
 import {
+  HARNESS_IDS,
+  ensureHarnessesInteractive,
+  listInstallCandidates,
+  type HarnessId,
+} from "./harness-install.js";
+import {
   defaultConfig,
   detectAskers,
   detectResponders,
@@ -432,6 +438,23 @@ export async function runJoin(argv: string[]): Promise<void> {
     token = joined.token;
     peer = joined.peer;
     console.log(`joined the relay as "${peer}"`);
+  }
+
+  if (interactive) {
+    const candidates = await listInstallCandidates();
+    if (candidates.length > 0) {
+      const chosen = await checkbox<HarnessId>({
+        message: "No coding-agent CLI ready. Install/login which? (space to toggle, empty = skip)",
+        choices: HARNESS_IDS.map((id) => ({
+          value: id,
+          name: id,
+          checked: true,
+        })),
+      });
+      if (chosen.length > 0) {
+        await ensureHarnessesInteractive(chosen);
+      }
+    }
   }
 
   const askers = await askAskers(flags.askers, detectAskers(home), interactive);

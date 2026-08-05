@@ -15,6 +15,7 @@ import { runRelay } from "./relay.js";
 import { readConfigFile, runSettings } from "./settings.js";
 import { runSetup } from "./setup-wizard.js";
 import { runStatus } from "./status.js";
+import { runUninstall } from "./uninstall.js";
 import { canUseTui, launchTui } from "./tui/launch.js";
 
 function isJoined(home: string): boolean {
@@ -33,6 +34,7 @@ Setup
   invite [--ttl h] [--secret s | --app]  create an invite code
   settings                               edit restrictions, model, persona, harness
   policy                                 edit ~/.doucopy/policy.md
+  uninstall [--purge] [--yes]            stop daemon; --purge also wipes config/skills/MCP
 
 Daily
   chat                                   interactive REPL to ask peers
@@ -94,6 +96,17 @@ async function main(): Promise<void> {
     case "policy":
       runPolicy(home);
       return;
+    case "uninstall": {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          purge: { type: "boolean", default: false },
+          yes: { type: "boolean", default: false },
+        },
+      });
+      await runUninstall({ home, purge: values.purge, yes: values.yes });
+      return;
+    }
     case "invite":
       if (tui && rest.length === 0) {
         await launchTui({ screen: "invite" });

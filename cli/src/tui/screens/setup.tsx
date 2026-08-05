@@ -23,6 +23,12 @@ import {
   WRITE_ALLOW_PRESETS,
   type RestrictionsSettings,
 } from "../../settings.js";
+import {
+  HARNESS_IDS,
+  ensureHarnessesInteractive,
+  listInstallCandidates,
+  type HarnessId,
+} from "../../harness-install.js";
 import { detectAskers, detectResponders, responderHarnessDisabledReason } from "../../setup.js";
 import { areAllSkillsInstalled } from "../../skills.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
@@ -43,6 +49,9 @@ type Phase =
   | { kind: "name" }
   | { kind: "name_custom" }
   | { kind: "joining" }
+  | { kind: "harness_check" }
+  | { kind: "harness_offer" }
+  | { kind: "harness_installing"; selected: HarnessId[] }
   | { kind: "askers" }
   | { kind: "responder" }
   | { kind: "skills" }
@@ -88,6 +97,8 @@ export type SetupScreenDeps = {
   finalizeJoin?: typeof finalizeJoin;
   clearDraft?: typeof clearDraft;
   areAllSkillsInstalled?: typeof areAllSkillsInstalled;
+  listInstallCandidates?: typeof listInstallCandidates;
+  ensureHarnessesInteractive?: typeof ensureHarnessesInteractive;
 };
 
 /** Test-only bootstrap to skip the interactive prefix of the wizard. */
@@ -114,6 +125,8 @@ export function SetupScreen({
   const finalizeJoinFn = deps?.finalizeJoin ?? finalizeJoin;
   const clearDraftFn = deps?.clearDraft ?? clearDraft;
   const skillsInstalledFn = deps?.areAllSkillsInstalled ?? areAllSkillsInstalled;
+  const listCandidatesFn = deps?.listInstallCandidates ?? listInstallCandidates;
+  const ensureHarnessesFn = deps?.ensureHarnessesInteractive ?? ensureHarnessesInteractive;
 
   const existing = useMemo(() => readExistingConnection(home), [home]);
   const draftPrefill = useMemo(() => readDraft(home), [home]);
@@ -143,7 +156,12 @@ export function SetupScreen({
   const pushLog = (line: string) => setLog((prev) => [...prev, line]);
 
   useEffect(() => {
-    const key = phase.kind === "owner_deploying" ? `deploy:${phase.app}` : phase.kind;
+    const key =
+      phase.kind === "owner_deploying"
+        ? `deploy:${phase.app}`
+        : phase.kind === "harness_installing"
+          ? `install:${phase.selected.join(",")}`
+          : phase.kind;
     if (ran.current === key) return;
 
     if (phase.kind === "owner_deploying") {
@@ -173,7 +191,7 @@ export function SetupScreen({
     if (phase.kind === "joining") {
       ran.current = key;
       if (data.token) {
-        setPhase({ kind: "askers" });
+        setPhase({ kind: "harness_check" });
         return;
       }
       void (async () => {
@@ -181,7 +199,7 @@ export function SetupScreen({
           const joined = await joinRelayFn(data.relayUrl!, data.invite!, data.peer!);
           setData((d) => ({ ...d, token: joined.token, peer: joined.peer }));
           pushLog(`joined as "${joined.peer}"`);
-          setPhase({ kind: "askers" });
+          setPhase({ kind: "harness_check" });
         } catch (err) {
           setPhase({
             kind: "done",
@@ -189,6 +207,27 @@ export function SetupScreen({
             messages: [err instanceof Error ? err.message : String(err)],
           });
         }
+      })();
+      return;
+    }
+
+    if (phase.kind === "harness_check") {
+      ran.current = key;
+      void (async () => {
+        const candidates = await listCandidatesFn();
+        if (candidates.length === 0) setPhase({ kind: "askers" });
+        else setPhase({ kind: "harness_offer" });
+      })();
+      return;
+    }
+
+    if (phase.kind === "harness_installing") {
+      ran.current = key;
+      void (async () => {
+        await ensureHarnessesFn(phase.selected, {
+          log: (line) => pushLog(line),
+        });
+        setPhase({ kind: "askers" });
       })();
       return;
     }
@@ -226,7 +265,17 @@ export function SetupScreen({
         setPhase({ kind: "done", ok: result.ok, messages: [...result.messages, ...result.errors] });
       })();
     }
-  }, [phase, data, home, joinRelayFn, finalizeJoinFn, clearDraftFn, skillsInstalledFn]);
+  }, [
+    phase,
+    data,
+    home,
+    joinRelayFn,
+    finalizeJoinFn,
+    clearDraftFn,
+    skillsInstalledFn,
+    listCandidatesFn,
+    ensureHarnessesFn,
+  ]);
 
   if (phase.kind === "owner_app") {
     return (
@@ -274,7 +323,7 @@ export function SetupScreen({
                 peer: existing.peer,
                 token: existing.token,
               }));
-              setPhase({ kind: "askers" });
+              setPhase({ kind: "harness_check" });
             } catch {
               pushLog("existing token invalid, fresh join");
               setPhase({ kind: "relay" });
@@ -359,6 +408,42 @@ export function SetupScreen({
 
   if (phase.kind === "joining") {
     return <Text color={theme.warn}>Joining relay…</Text>;
+  }
+
+  if (phase.kind === "harness_check") {
+    return <Text color={theme.dim}>Checking coding-agent CLIs…</Text>;
+  }
+
+  if (phase.kind === "harness_offer") {
+    return (
+      <ListEditor
+        title="No coding-agent CLI ready. Install/login (space to toggle, Enter to continue, empty = skip)"
+        presets={[...HARNESS_IDS]}
+        current={[...HARNESS_IDS]}
+        onCancel={() => setPhase({ kind: "askers" })}
+        onSave={(selected) => {
+          ran.current = "";
+          const ids = selected.filter((s): s is HarnessId =>
+            (HARNESS_IDS as readonly string[]).includes(s),
+          );
+          if (ids.length === 0) setPhase({ kind: "askers" });
+          else setPhase({ kind: "harness_installing", selected: ids });
+        }}
+      />
+    );
+  }
+
+  if (phase.kind === "harness_installing") {
+    return (
+      <Box flexDirection="column">
+        <Text color={theme.warn}>Installing / logging in…</Text>
+        {log.slice(-8).map((m, i) => (
+          <Text key={i} color={theme.dim}>
+            {m}
+          </Text>
+        ))}
+      </Box>
+    );
   }
 
   if (phase.kind === "askers") {

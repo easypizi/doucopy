@@ -18,6 +18,16 @@ doucopy join <relay-url> <invite>    # same TUI, fields prefilled
 npx doucopy@latest
 ```
 
+If no coding-agent CLI is installed/logged in (`cursor-agent`/`agent`, `claude`, `codex`), Setup offers to install and log in to one or more of them (macOS and Windows).
+
+## Uninstall
+
+```bash
+doucopy uninstall              # stop daemon / supervisor; keep ~/.doucopy
+doucopy uninstall --purge --yes  # also delete ~/.doucopy, global doucopy-* skills, MCP entries
+npm uninstall -g doucopy       # remove the npm package itself
+```
+
 ## First-run order
 
 1. `npm install -g doucopy` then `doucopy` (or `doucopy join <url> <invite>`).

@@ -256,7 +256,13 @@ describe("Setup join happy path", () => {
     const { lastFrame: joinFrame, unmount: uJoin } = render(
       <SetupScreen
         home={home}
-        deps={{ joinRelay, finalizeJoin, clearDraft: () => undefined, areAllSkillsInstalled: () => true }}
+        deps={{
+          joinRelay,
+          finalizeJoin,
+          clearDraft: () => undefined,
+          areAllSkillsInstalled: () => true,
+          listInstallCandidates: async () => [],
+        }}
         testBootstrap={{
           phase: { kind: "joining" },
           data: {
@@ -279,7 +285,7 @@ describe("Setup join happy path", () => {
     cleanups.push(uJoin);
     await new Promise((r) => setTimeout(r, 120));
     expect(joinCalls).toEqual(["ali1.test:test-peer"]);
-    expect(joinFrame() ?? "").toMatch(/Askers|Joining|ask/i);
+    expect(joinFrame() ?? "").toMatch(/Askers|Joining|ask|Checking coding-agent/i);
 
     const { lastFrame, unmount } = render(
       <SetupScreen
