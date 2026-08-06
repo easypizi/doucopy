@@ -4,6 +4,7 @@ export interface MemoryMap {
   transcript_files: string[];
   agents_md_files: string[];
   extra_files: string[];
+  skill_roots: string[];
 }
 
 export interface QuestionContext {
@@ -88,6 +89,14 @@ function counterQuestionSection(ctx: QuestionContext): string[] {
   ];
 }
 
+const HARNESS_MEMORY_HINT = [
+  "You may also use your harness's built-in memories, normally configured MCP tools",
+  "(loaded by the host from its global config, not from this list), and any read-only",
+  "tools available in this session (codebase search, file read, etc.) to gather facts.",
+  "Never paste secrets, tokens, or MCP env values from config files into your answer.",
+  "If the `doucopy-answer` skill is available, follow it for the search method.",
+].join("\n");
+
 export function buildFirstTask(
   policy: string,
   question: string,
@@ -114,11 +123,15 @@ export function buildFirstTask(
   if (memory.extra_files.length > 0) {
     lines.push("Extra files:", ...memory.extra_files.map((f) => `- ${f}`));
   }
+  if (memory.skill_roots.length > 0) {
+    lines.push(
+      "Skill / plan / rule roots (search as needed; read SKILL.md or matching files, do not dump wholesale):",
+      ...memory.skill_roots.map((f) => `- ${f}`),
+    );
+  }
   lines.push(
     "",
-    "You may also use your own built-in Cursor Memories and any read-only tools",
-    "available in this session (codebase search, file read, etc.) to gather facts.",
-    "If the `doucopy-answer` skill is available, follow it for the search method.",
+    HARNESS_MEMORY_HINT,
     "",
     ...counterQuestionSection(ctx),
     "## Rules",
@@ -146,9 +159,10 @@ export function buildFollowupTask(
     "",
     policy.trim() || "No extra restrictions.",
     "",
-    "You may keep using the curated sources from the first turn plus your own",
-    "built-in Cursor Memories and read-only tools. Every fact must trace back to",
-    "a source you actually consulted.",
+    "You may keep using the curated sources from the first turn plus your harness's",
+    "built-in memories, normally configured MCP tools, and read-only tools.",
+    "Every fact must trace back to a source you actually consulted.",
+    "Never paste secrets or MCP env values into your answer.",
     "If the `doucopy-answer` skill is available, follow it for the search method.",
     "",
     ...counterQuestionSection(ctx),

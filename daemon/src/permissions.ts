@@ -101,6 +101,7 @@ function memoryReadAllows(config: DaemonConfig): string[] {
   }
   for (const root of config.memory_sources.agents_md_roots) allows.add(root);
   for (const file of config.memory_sources.extra_files) allows.add(path.dirname(file));
+  for (const root of config.memory_sources.skill_roots ?? []) allows.add(root);
   return [...allows];
 }
 

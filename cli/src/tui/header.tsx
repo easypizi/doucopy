@@ -22,7 +22,14 @@ function DotLabel({ label, on }: { label: string; on: boolean }) {
   );
 }
 
-export function Header({ snap }: { snap: StatusSnapshot }) {
+export function Header({
+  snap,
+  updateAvailable,
+}: {
+  snap: StatusSnapshot;
+  /** Latest version string when an update is available. */
+  updateAvailable?: string | null;
+}) {
   const model = snap.config?.responder?.model ?? "(default)";
   const harness = snap.config?.responder?.harness ?? "cursor-agent";
   const peer = snap.config?.self_peer ?? "(not joined)";
@@ -40,6 +47,9 @@ export function Header({ snap }: { snap: StatusSnapshot }) {
       <Box justifyContent="space-between">
         <Text color={theme.brand} bold>
           doucopy v{APP_VERSION}
+          {updateAvailable ? (
+            <Text color={theme.warn}> · update v{updateAvailable}</Text>
+          ) : null}
         </Text>
         <Text color={theme.dim}>{snap.joined ? snap.relayHost : "not connected"}</Text>
       </Box>

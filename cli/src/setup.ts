@@ -7,6 +7,8 @@ import path from "node:path";
 export interface MemoryDiscovery {
   agents_md_roots: string[];
   extra_files: string[];
+  /** Searchable skill / plan / rule directories (listed as roots in the responder task). */
+  skill_roots: string[];
 }
 
 const DEV_ROOT_CANDIDATES = [
@@ -60,6 +62,47 @@ export function detectTranscriptGlobs(home: string): string[] {
   return globs.length > 0 ? globs : [CURSOR_TRANSCRIPTS_GLOB];
 }
 
+const EXTRA_FILE_DENY_NAMES = new Set([
+  "mcp.json",
+  "mcp.json.bak",
+  "auth.json",
+  "ide_state.json",
+  "agent-cli-state.json",
+  "cli-config.json",
+  "argv.json",
+  "statsig-cache.json",
+]);
+
+function pushUnique(list: string[], value: string): void {
+  if (!value || list.includes(value)) return;
+  list.push(value);
+}
+
+function addIfDir(list: string[], dir: string): void {
+  if (existsSync(dir)) pushUnique(list, dir);
+}
+
+/** Skill / plan / rule roots the responder may search (not dumped file-by-file). */
+export function discoverSkillRoots(home: string): string[] {
+  const roots: string[] = [];
+  const cursor = path.join(home, ".cursor");
+  addIfDir(roots, path.join(cursor, "skills"));
+  addIfDir(roots, path.join(cursor, "skills-cursor"));
+  addIfDir(roots, path.join(cursor, "plans"));
+  addIfDir(roots, path.join(cursor, "rules"));
+  // Any additional ~/.cursor/skills-* overlays (e.g. skills-marketing).
+  if (existsSync(cursor)) {
+    for (const hit of fg.sync("skills-*", { cwd: cursor, onlyDirectories: true, absolute: true, suppressErrors: true })) {
+      addIfDir(roots, hit);
+    }
+  }
+  addIfDir(roots, path.join(home, ".claude", "skills"));
+  addIfDir(roots, path.join(home, ".claude", "rules"));
+  addIfDir(roots, path.join(home, ".codex", "skills"));
+  addIfDir(roots, path.join(home, ".codex", "memories"));
+  return roots;
+}
+
 export function discoverMemorySources(home: string): MemoryDiscovery {
   const agents_md_roots: string[] = [];
   for (const rel of DEV_ROOT_CANDIDATES) {
@@ -68,14 +111,54 @@ export function discoverMemorySources(home: string): MemoryDiscovery {
     const found = fg.sync("**/AGENTS.md", { cwd: root, deep: 4, suppressErrors: true });
     if (found.length > 0) agents_md_roots.push(root);
   }
+
   const extra_files: string[] = [];
   const cursorDir = path.join(home, ".cursor");
   if (existsSync(cursorDir)) {
-    extra_files.push(...fg.sync("*.md", { cwd: cursorDir, absolute: true, suppressErrors: true }));
+    for (const file of fg.sync("*.md", { cwd: cursorDir, absolute: true, suppressErrors: true })) {
+      const base = path.basename(file);
+      if (EXTRA_FILE_DENY_NAMES.has(base)) continue;
+      if (base.toLowerCase().endsWith(".sqlite") || base.includes("sqlite")) continue;
+      pushUnique(extra_files, file);
+    }
+  }
+
+  for (const rel of ["CLAUDE.md", "AGENTS.md"]) {
+    const atHome = path.join(home, rel);
+    if (existsSync(atHome)) pushUnique(extra_files, atHome);
   }
   const claudeMd = path.join(home, ".claude", "CLAUDE.md");
-  if (existsSync(claudeMd)) extra_files.push(claudeMd);
-  return { agents_md_roots, extra_files };
+  if (existsSync(claudeMd)) pushUnique(extra_files, claudeMd);
+
+  const codex = path.join(home, ".codex");
+  if (existsSync(codex)) {
+    for (const file of fg.sync("**/AGENTS.md", { cwd: codex, deep: 3, absolute: true, suppressErrors: true })) {
+      pushUnique(extra_files, file);
+    }
+    for (const file of fg.sync("memories/**/*.{md,txt}", { cwd: codex, absolute: true, suppressErrors: true })) {
+      pushUnique(extra_files, file);
+    }
+  }
+
+  return {
+    agents_md_roots,
+    extra_files,
+    skill_roots: discoverSkillRoots(home),
+  };
+}
+
+/** Union live discovery into an existing memory_sources object (no config rewrite). */
+export function mergeDiscoveredMemory(
+  home: string,
+  memory: { agents_md_roots?: string[]; extra_files?: string[]; skill_roots?: string[] },
+): { agents_md_roots: string[]; extra_files: string[]; skill_roots: string[] } {
+  const discovered = discoverMemorySources(home);
+  const union = (a: string[] | undefined, b: string[]) => [...new Set([...(a ?? []), ...b])];
+  return {
+    agents_md_roots: union(memory.agents_md_roots, discovered.agents_md_roots),
+    extra_files: union(memory.extra_files, discovered.extra_files),
+    skill_roots: union(memory.skill_roots, discovered.skill_roots),
+  };
 }
 
 export function defaultConfig(
@@ -94,6 +177,7 @@ export function defaultConfig(
       transcripts_glob: globs.length === 1 ? globs[0] : globs,
       agents_md_roots: discovery.agents_md_roots,
       extra_files: discovery.extra_files,
+      skill_roots: discovery.skill_roots,
     },
     responder: {
       cursor_agent_binary: "cursor-agent",

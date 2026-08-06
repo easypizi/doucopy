@@ -2,6 +2,13 @@ import { Box, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { askPeer, fetchReply } from "../../api.js";
+import {
+  loadChatHistory,
+  saveChatHistory,
+  withDialogPreview,
+  type ChatDialog,
+  type ChatFeedItem,
+} from "../../chat-history.js";
 import { localAsk, resolveLocalHarness } from "../../local-ask.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { SelectModal } from "../components/SelectModal.js";
@@ -12,24 +19,8 @@ const REPLY_WAIT = 20;
 const REPLY_MAX = 30;
 export const LOCAL_PEER = "(local)";
 
-type FeedKind = "system" | "ask" | "reply" | "note" | "status";
-
-interface FeedItem {
-  id: string;
-  kind: FeedKind;
-  peer?: string;
-  dialogId?: string;
-  text: string;
-  pending?: boolean;
-}
-
-interface Dialog {
-  id: string;
-  peer: string;
-  conversationId: string | null;
-  label: string;
-  updatedAt: number;
-}
+type FeedItem = ChatFeedItem;
+type Dialog = ChatDialog;
 
 function newId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -74,13 +65,13 @@ export function ChatScreen({
     return `${LOCAL_PEER} ${harness}`;
   }, [snap.config?.responder?.harness]);
 
-  const [feed, setFeed] = useState<FeedItem[]>([
-    {
-      id: "welcome",
-      kind: "system",
-      text: "Type a question and press Enter — pick a peer (or local agent). /ask opens the picker. /local asks this machine. /dialogs jumps threads.",
-    },
-  ]);
+  const welcomeItem: FeedItem = {
+    id: "welcome",
+    kind: "system",
+    text: "Type a question and Enter — pick a peer or local. /ask picker · /local · /dialogs threads (saved across tabs/restarts).",
+  };
+
+  const [feed, setFeed] = useState<FeedItem[]>([welcomeItem]);
   const [dialogs, setDialogs] = useState<Dialog[]>([]);
   const [activeDialogId, setActiveDialogId] = useState<string | null>(null);
   const [filterDialogId, setFilterDialogId] = useState<string | null>(null);
@@ -89,9 +80,26 @@ export function ChatScreen({
   const [value, setValue] = useState("");
   const [pending, setPending] = useState(0);
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
+  const [hydrated, setHydrated] = useState(false);
   const dialogsRef = useRef(dialogs);
   const activeRef = useRef(activeDialogId);
   const primedRef = useRef(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!localHome) {
+      setHydrated(true);
+      return;
+    }
+    const hist = loadChatHistory(localHome);
+    if (hist.feed.length > 0) setFeed(hist.feed);
+    if (hist.dialogs.length > 0) setDialogs(withDialogPreview(hist.dialogs, hist.feed));
+    setActiveDialogId(hist.activeDialogId);
+    setFilterDialogId(hist.filterDialogId);
+    setAskPeerName(hist.askPeerName);
+    if (hist.askPeerName || hist.activeDialogId) primedRef.current = true;
+    setHydrated(true);
+  }, [localHome]);
 
   useEffect(() => {
     dialogsRef.current = dialogs;
@@ -102,6 +110,26 @@ export function ChatScreen({
   useEffect(() => {
     onBusyChange?.(pending > 0);
   }, [pending, onBusyChange]);
+
+  useEffect(() => {
+    if (!localHome || !hydrated) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      const withPreview = withDialogPreview(dialogs, feed);
+      saveChatHistory(localHome, {
+        schema_version: 1,
+        dialogs: withPreview,
+        feed,
+        activeDialogId,
+        filterDialogId,
+        askPeerName,
+        updatedAt: Date.now(),
+      });
+    }, 300);
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, [localHome, hydrated, feed, dialogs, activeDialogId, filterDialogId, askPeerName]);
 
   // One peer → auto-target them so plain questions go out without /ask.
   useEffect(() => {
@@ -393,9 +421,9 @@ export function ChatScreen({
       openAskPicker(question || undefined);
       return;
     }
-    if (line === "/dialogs" || line === "/d") {
+    if (line === "/dialogs" || line === "/d" || line === "/threads") {
       if (dialogs.length === 0) {
-        push({ kind: "system", text: "No dialogs yet. Ask someone first." });
+        push({ kind: "system", text: "No threads yet. Ask someone first." });
         return;
       }
       setMode("pick_dialog");
@@ -426,7 +454,7 @@ export function ChatScreen({
     if (line.startsWith("/")) {
       push({
         kind: "system",
-        text: "Commands: /ask · /local · /clear · /dialogs · /all · /new · /quit",
+        text: "Commands: /ask · /local · /clear · /dialogs|/threads · /all · /new · /quit",
       });
       return;
     }
@@ -511,17 +539,21 @@ export function ChatScreen({
   }
 
   if (mode === "pick_dialog") {
-    const sorted = [...dialogs].sort((a, b) => b.updatedAt - a.updatedAt);
+    const sorted = withDialogPreview(dialogs, feed).sort((a, b) => b.updatedAt - a.updatedAt);
     return (
       <SelectModal
-        title="Jump to dialog"
-        description="Filter the feed to one thread, or pick All at the top."
+        title="Threads"
+        description="Jump to a saved thread (history persists across tabs and restarts)."
         options={[
           { value: "__all__", label: "● All peers (full feed)" },
-          ...sorted.map((d) => ({
-            value: d.id,
-            label: `${d.peer}  ${d.conversationId ? d.conversationId.slice(0, 8) : "new"}`,
-          })),
+          ...sorted.map((d) => {
+            const idSlice = d.conversationId ? d.conversationId.slice(0, 8) : "new";
+            const preview = d.lastPreview ? ` · ${d.lastPreview}` : "";
+            return {
+              value: d.id,
+              label: `${d.peer}  ${idSlice}${preview}`,
+            };
+          }),
         ]}
         onCancel={() => setMode("feed")}
         onSelect={(id) => {
@@ -538,7 +570,7 @@ export function ChatScreen({
               kind: "system",
               dialogId: id,
               peer: d?.peer,
-              text: `Focused dialog: ${d?.label ?? id}`,
+              text: `Focused thread: ${d?.label ?? id}`,
             });
           }
           setMode("feed");
@@ -579,7 +611,7 @@ export function ChatScreen({
           )}
         </Text>
         <Text color={theme.dim}>
-          {dialogs.length} dialogs
+          {dialogs.length} threads · Ctrl+D
           {pending > 0 ? ` · ${pending} pending` : ""}
         </Text>
       </Box>

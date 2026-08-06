@@ -67,6 +67,8 @@ export interface DaemonConfig {
     transcripts_glob: string | string[];
     agents_md_roots: string[];
     extra_files: string[];
+    /** Skill / plan / rule directories to search (optional; default []). */
+    skill_roots?: string[];
   };
   responder: {
     harness?: HarnessKind;
@@ -239,6 +241,18 @@ export function loadConfig(filePath = "~/.doucopy/config.json"): DaemonConfig {
   if (!Array.isArray(config.memory_sources.extra_files)) {
     throw new Error("config: missing memory_sources.extra_files");
   }
+  if (
+    config.memory_sources.skill_roots !== undefined
+    && !Array.isArray(config.memory_sources.skill_roots)
+  ) {
+    throw new Error("config: memory_sources.skill_roots must be an array of strings");
+  }
+  if (
+    Array.isArray(config.memory_sources.skill_roots)
+    && !config.memory_sources.skill_roots.every((v) => typeof v === "string")
+  ) {
+    throw new Error("config: memory_sources.skill_roots must be an array of strings");
+  }
   if (!config.responder || typeof config.responder !== "object") {
     throw new Error("config: missing responder");
   }
@@ -296,6 +310,7 @@ export function loadConfig(filePath = "~/.doucopy/config.json"): DaemonConfig {
   }
   config.memory_sources.agents_md_roots = config.memory_sources.agents_md_roots.map(expandHome);
   config.memory_sources.extra_files = config.memory_sources.extra_files.map(expandHome);
+  config.memory_sources.skill_roots = (config.memory_sources.skill_roots ?? []).map(expandHome);
   config.responder.workspace_dir = expandHome(config.responder.workspace_dir);
   if (config.restrictions?.fs_write?.allow) {
     config.restrictions.fs_write.allow = config.restrictions.fs_write.allow.map(expandHome);

@@ -1,7 +1,9 @@
 import fg from "fast-glob";
+import { homedir } from "node:os";
 import path from "node:path";
 import { normalizeTranscriptGlobs, resolveHarness, type DaemonConfig } from "./config.js";
 import type { ConversationStore } from "./conversations.js";
+import { discoverExtraFiles, discoverSkillRoots, unionPaths } from "./discover-memory.js";
 import { createHarness, type Harness, type HarnessOptions } from "./harness.js";
 import { isPaused, pausedUntil } from "./paused.js";
 import {
@@ -16,13 +18,30 @@ import { buildFirstTask, buildFollowupTask, type MemoryMap } from "./prompt.js";
 import { applyRedactions, compileRedactRules } from "./redact.js";
 import { safeDirName } from "./workspace.js";
 
+/** Union live discovery into memory_sources for this turn (does not rewrite config.json). */
+export function withLiveMemory(config: DaemonConfig, home: string = homedir()): DaemonConfig {
+  return {
+    ...config,
+    memory_sources: {
+      ...config.memory_sources,
+      skill_roots: unionPaths(config.memory_sources.skill_roots, discoverSkillRoots(home)),
+      extra_files: unionPaths(config.memory_sources.extra_files, discoverExtraFiles(home)),
+    },
+  };
+}
+
 function collectMemory(config: DaemonConfig): MemoryMap {
   const globs = normalizeTranscriptGlobs(config.memory_sources.transcripts_glob);
   const transcript_files = fg.sync(globs, { absolute: true });
   const agents_md_files = config.memory_sources.agents_md_roots.flatMap((root) =>
     fg.sync(path.join(root, "**/AGENTS.md"), { absolute: true }),
   );
-  return { transcript_files, agents_md_files, extra_files: config.memory_sources.extra_files };
+  return {
+    transcript_files,
+    agents_md_files,
+    extra_files: config.memory_sources.extra_files,
+    skill_roots: config.memory_sources.skill_roots ?? [],
+  };
 }
 
 export function createHandler(
@@ -77,7 +96,8 @@ export function createHandler(
       config.responder.workspace_dir,
       safeDirName(question.conversation_id),
     );
-    const perms = buildPermissions(config, conversationWorkspace);
+    const liveConfig = withLiveMemory(config);
+    const perms = buildPermissions(liveConfig, conversationWorkspace);
     logRestrictionsSummary(perms);
     if (kind === "cursor-agent") {
       materializeCursorPermissions(conversationWorkspace, perms);
@@ -102,7 +122,7 @@ export function createHandler(
         hops: question.hops,
       };
       const task = isFirstTurn
-        ? buildFirstTask(parsedPolicy.text, question.question, collectMemory(config), ctx, promptOpts)
+        ? buildFirstTask(parsedPolicy.text, question.question, collectMemory(liveConfig), ctx, promptOpts)
         : buildFollowupTask(parsedPolicy.text, question.question, ctx, promptOpts);
       const result = isFirstTurn
         ? await harness.runFirstTask(runnerOpts, task)

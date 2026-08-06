@@ -1,5 +1,6 @@
 import { Box, Text, useApp, useInput, useWindowSize } from "ink";
 import { useEffect, useRef, useState } from "react";
+import { checkForUpdate, type UpdateCheckResult } from "../update-check.js";
 import { FooterHints } from "./components/FooterHints.js";
 import { Panel } from "./components/Panel.js";
 import { TabBar } from "./components/TabBar.js";
@@ -11,7 +12,8 @@ import { PeersScreen } from "./screens/peers.js";
 import { SettingsScreen } from "./screens/settings.js";
 import { SetupScreen } from "./screens/setup.js";
 import { StatusScreen } from "./screens/status.js";
-import { theme } from "./theme.js";
+import { UpdatesScreen } from "./screens/updates.js";
+import { APP_VERSION, theme } from "./theme.js";
 import { SCREENS, type LaunchOptions, type ScreenId } from "./types.js";
 import { useStatusSnapshot } from "./useStatusSnapshot.js";
 
@@ -36,11 +38,16 @@ export function App({
   const [screen, setScreen] = useState<ScreenId>(initialScreen);
   const [chatBusy, setChatBusy] = useState(false);
   const [quitHint, setQuitHint] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
   const lastQuitAt = useRef(0);
   const snap = useStatusSnapshot(home);
 
   const screenIndex = SCREENS.indexOf(screen);
   const wrapScreens = screen !== "status";
+
+  useEffect(() => {
+    setUpdateInfo(checkForUpdate(home, APP_VERSION, { force: false }));
+  }, [home]);
 
   useEffect(() => {
     if (!quitHint) return;
@@ -68,7 +75,10 @@ export function App({
       return;
     }
     // Quick jump to Chat from browse screens (not while typing in Settings/Setup).
-    if (input === "c" && (screen === "status" || screen === "peers" || screen === "invite" || screen === "ops")) {
+    if (
+      input === "c"
+      && (screen === "status" || screen === "peers" || screen === "invite" || screen === "ops" || screen === "updates")
+    ) {
       setScreen("chat");
       return;
     }
@@ -86,6 +96,8 @@ export function App({
           snap={snap}
           onRefresh={snap.refresh}
           onOpenPeers={() => setScreen("peers")}
+          onOpenUpdates={() => setScreen("updates")}
+          updateAvailable={updateInfo?.updateAvailable ? updateInfo.latest : null}
           inputActive
         />
       ) : null}
@@ -99,6 +111,9 @@ export function App({
       ) : null}
       {screen === "invite" ? <InviteScreen home={home} inputActive /> : null}
       {screen === "ops" ? <OpsScreen home={home} inputActive /> : null}
+      {screen === "updates" ? (
+        <UpdatesScreen home={home} inputActive onResult={setUpdateInfo} />
+      ) : null}
     </>
   );
 
@@ -109,7 +124,10 @@ export function App({
   return (
     <Box flexDirection="column" width={columns} height={rows} paddingX={1} paddingY={0}>
       <Box flexShrink={0}>
-        <Header snap={snap} />
+        <Header
+          snap={snap}
+          updateAvailable={updateInfo?.updateAvailable ? updateInfo.latest : null}
+        />
       </Box>
       <Box flexShrink={0}>
         <TabBar active={screen} />

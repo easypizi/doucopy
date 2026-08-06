@@ -67,6 +67,7 @@ describe("TUI chrome", () => {
     expect(frame).toContain("Chat");
     expect(frame).toContain("Setup");
     expect(frame).toContain("Ops");
+    expect(frame).toContain("Updates");
   });
 
   it("header shows not joined state", () => {

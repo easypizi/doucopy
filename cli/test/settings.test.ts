@@ -44,7 +44,7 @@ describe("settings helpers", () => {
 
   it("applies model, persona, harness and redact literals", () => {
     const home = makeHome();
-    writeConfig(home, defaultConfig("https://r.example.com", "mbp", "tok", { agents_md_roots: [], extra_files: [] }));
+    writeConfig(home, defaultConfig("https://r.example.com", "mbp", "tok", { agents_md_roots: [], extra_files: [], skill_roots: [] }));
     let config = readConfigFile(home)!;
     config = applyResponderField(config, "model", "composer-2.5");
     config = applyResponderField(config, "persona", "brief, Russian");

@@ -9,11 +9,13 @@ You are the responder in a doucopy exchange. The daemon has already told you the
 
 ## Memory source shapes
 
-Two source types will appear in the task:
+Sources that appear in the task:
 
-- **Chat transcripts** (`~/.cursor/projects/*/agent-transcripts/**/*.jsonl`): one JSON object per line, chronological. Each line typically has `role`, `content`, timestamp, and metadata. Filenames are opaque UUIDs, so use content search, not filename search.
+- **Chat transcripts** (`~/.cursor/projects/*/agent-transcripts/**/*.jsonl`, plus Claude/Codex globs when present): one JSON object per line, chronological. Filenames are opaque UUIDs, so use content search, not filename search.
 - **`AGENTS.md` files**: markdown notes accumulated per project. Small, worth reading whole when relevant.
-- **Extra files**: hand-picked by the owner. Treat as authoritative for their scope.
+- **Extra files**: owner identity/docs (e.g. `~/.cursor/*.md`, `~/.claude/CLAUDE.md`). Treat as authoritative for their scope.
+- **Skill / plan / rule roots**: directories such as `~/.cursor/skills`, `~/.cursor/plans`, `~/.claude/skills`. Search on demand (read matching `SKILL.md` / notes). Do not dump wholesale.
+- **MCP:** your harness may already load global MCP from its own config (`mcp.json` / Claude / Codex). That is not listed as a memory file (configs often hold secrets). Use MCP tools normally; never paste tokens/env into the answer.
 
 ## Search strategy
 

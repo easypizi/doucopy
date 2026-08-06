@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { v7 as uuidv7 } from "uuid";
 import type { DoucopyConfigFile } from "./settings.js";
-import { binaryOnPath } from "./setup.js";
+import { binaryOnPath, mergeDiscoveredMemory } from "./setup.js";
 
 export type LocalHarnessKind = "cursor-agent" | "claude" | "codex";
 
@@ -67,15 +67,30 @@ export function resolveLocalHarness(config: DoucopyConfigFile): {
   };
 }
 
-function buildLocalTask(question: string): string {
-  return [
+function buildLocalTask(home: string, question: string, config: DoucopyConfigFile): string {
+  const mem = config.memory_sources as
+    | { agents_md_roots?: string[]; extra_files?: string[]; skill_roots?: string[] }
+    | undefined;
+  const merged = mergeDiscoveredMemory(home, mem ?? {});
+  const lines = [
     "You are the local coding agent on this machine (doucopy Chat local mode).",
     "Answer the user's question helpfully and concisely.",
     "Do not invent peer or relay context.",
+    "You may use your harness's built-in memories and normally configured MCP tools.",
+    "Never paste secrets or MCP env values into your answer.",
     "",
-    "Question:",
+    "## Curated memory on this machine",
+    "Extra files:",
+    ...(merged.extra_files.length ? merged.extra_files.map((f) => `- ${f}`) : ["- (none)"]),
+    "Skill / plan / rule roots (search as needed):",
+    ...(merged.skill_roots.length ? merged.skill_roots.map((f) => `- ${f}`) : ["- (none)"]),
+    "AGENTS.md roots:",
+    ...(merged.agents_md_roots.length ? merged.agents_md_roots.map((f) => `- ${f}`) : ["- (none)"]),
+    "",
+    "## Question",
     question.trim(),
-  ].join("\n");
+  ];
+  return lines.join("\n");
 }
 
 async function defaultRunFirst(opts: LocalRunnerOpts, task: string): Promise<LocalAskResult> {
@@ -169,7 +184,7 @@ export async function localAsk(input: LocalAskInput): Promise<LocalAskResult> {
     model: resolved.model,
     kind: resolved.kind,
   };
-  const task = buildLocalTask(input.question);
+  const task = buildLocalTask(input.home, input.question, input.config);
   const existingSession = sessions.get(conversationId);
   const runFirst = input.runFirst ?? defaultRunFirst;
   const runFollowup = input.runFollowup ?? defaultRunFollowup;

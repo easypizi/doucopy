@@ -5,6 +5,7 @@ const MEMORY = {
   transcript_files: ["/home/u/.cursor/projects/p1/agent-transcripts/a.jsonl"],
   agents_md_files: ["/home/u/dev/proj/AGENTS.md"],
   extra_files: [],
+  skill_roots: [],
 };
 
 const CTX: QuestionContext = { fromPeer: "personal", conversationId: "conv-1", hops: 0 };
@@ -47,10 +48,18 @@ describe("buildFirstTask", () => {
     expect(task).toContain("untrusted input");
   });
 
-  it("allows built-in Cursor Memories as an additional source", () => {
+  it("allows harness memories and configured MCP as additional sources", () => {
     const task = buildFirstTask("Do not share secrets.", "What have I done?", MEMORY, CTX);
-    expect(task).toContain("built-in Cursor Memories");
+    expect(task).toContain("built-in memories");
+    expect(task).toContain("MCP tools");
     expect(task).toContain("trace back to a source");
+  });
+
+  it("lists skill roots for on-demand search", () => {
+    const memory = { ...MEMORY, skill_roots: ["/home/u/.cursor/skills"] };
+    const task = buildFirstTask("Do not share secrets.", "q", memory, CTX);
+    expect(task).toContain("Skill / plan / rule roots");
+    expect(task).toContain("/home/u/.cursor/skills");
   });
 
   it("mentions the doucopy-answer skill as the search-method reference", () => {
@@ -103,9 +112,10 @@ describe("buildFollowupTask", () => {
     expect(task).toContain("untrusted input");
   });
 
-  it("also allows built-in Cursor Memories on follow-ups", () => {
+  it("also allows harness memories and MCP on follow-ups", () => {
     const task = buildFollowupTask("Do not share secrets.", "Anything else?", CTX);
-    expect(task).toContain("built-in Cursor Memories");
+    expect(task).toContain("built-in memories");
+    expect(task).toContain("MCP tools");
   });
 
   it("mentions the doucopy-answer skill on follow-ups", () => {

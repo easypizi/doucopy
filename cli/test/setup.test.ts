@@ -45,8 +45,25 @@ describe("discoverMemorySources", () => {
     expect(found.extra_files).toEqual([path.join(home, ".claude/CLAUDE.md")]);
   });
 
+  it("includes skill/plan roots and excludes mcp.json", () => {
+    const home = makeHome();
+    mkdirSync(path.join(home, ".cursor/skills/foo"), { recursive: true });
+    mkdirSync(path.join(home, ".cursor/plans"), { recursive: true });
+    writeFileSync(path.join(home, ".cursor/mcp.json"), '{"mcpServers":{}}');
+    writeFileSync(path.join(home, ".cursor/NOTES.md"), "notes");
+    const found = discoverMemorySources(home);
+    expect(found.skill_roots).toContain(path.join(home, ".cursor/skills"));
+    expect(found.skill_roots).toContain(path.join(home, ".cursor/plans"));
+    expect(found.extra_files).toContain(path.join(home, ".cursor/NOTES.md"));
+    expect(found.extra_files.some((f) => f.endsWith("mcp.json"))).toBe(false);
+  });
+
   it("returns empty lists for a bare home", () => {
-    expect(discoverMemorySources(makeHome())).toEqual({ agents_md_roots: [], extra_files: [] });
+    expect(discoverMemorySources(makeHome())).toEqual({
+      agents_md_roots: [],
+      extra_files: [],
+      skill_roots: [],
+    });
   });
 });
 
@@ -72,7 +89,7 @@ describe("writeConfig", () => {
   it("writes 0600 config json under ~/.doucopy", () => {
     const home = makeHome();
     const file = writeConfig(home, defaultConfig("https://r.example.com", "mbp", "tok", {
-      agents_md_roots: [], extra_files: [],
+      agents_md_roots: [], extra_files: [], skill_roots: [],
     }, home));
     expect(file).toBe(path.join(home, ".doucopy/config.json"));
     const parsed = JSON.parse(readFileSync(file, "utf8")) as {
@@ -93,7 +110,7 @@ describe("writeConfig", () => {
     mkdirSync(path.join(home, ".claude/projects"), { recursive: true });
     const file = writeConfig(
       home,
-      defaultConfig("https://r.example.com", "mbp", "tok", { agents_md_roots: [], extra_files: [] }, home),
+      defaultConfig("https://r.example.com", "mbp", "tok", { agents_md_roots: [], extra_files: [], skill_roots: [] }, home),
     );
     const parsed = JSON.parse(readFileSync(file, "utf8")) as {
       memory_sources: { transcripts_glob: string[] };

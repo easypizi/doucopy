@@ -16,11 +16,15 @@ export function StatusScreen({
   snap,
   onRefresh,
   onOpenPeers,
+  onOpenUpdates,
+  updateAvailable,
   inputActive,
 }: {
   snap: StatusSnapshot;
   onRefresh: () => void;
   onOpenPeers: () => void;
+  onOpenUpdates?: () => void;
+  updateAvailable?: string | null;
   inputActive: boolean;
 }) {
   const { columns } = useWindowSize();
@@ -40,6 +44,7 @@ export function StatusScreen({
   useInput(
     (input, key) => {
       if (input === "r") onRefresh();
+      if (input === "u" && onOpenUpdates) onOpenUpdates();
       if (key.return) onOpenPeers();
     },
     { isActive: inputActive },
@@ -129,9 +134,19 @@ export function StatusScreen({
     </Panel>
   );
 
+  const updateBanner = updateAvailable ? (
+    <Box marginBottom={1} flexDirection="column">
+      <Text color={theme.warn} bold>
+        New doucopy v{updateAvailable} available.
+      </Text>
+      <Text color={theme.dim}>Tab to Updates (or press u) · npm i -g doucopy@latest</Text>
+    </Box>
+  ) : null;
+
   return (
     <Box flexDirection="column" flexGrow={1}>
       {harnessBanner}
+      {updateBanner}
       <Box flexDirection={wide ? "row" : "column"} flexGrow={1}>
         <Box flexGrow={1} marginRight={wide ? 1 : 0} marginBottom={wide ? 0 : 1}>
           {peersPanel}
@@ -139,7 +154,7 @@ export function StatusScreen({
         <Box flexGrow={1}>{dialogsPanel}</Box>
       </Box>
       <Box marginTop={1} flexShrink={0}>
-        <Text color={theme.dim}>c chat · r refresh · Enter Peers · Tab switch</Text>
+        <Text color={theme.dim}>c chat · u updates · r refresh · Enter Peers · Tab switch</Text>
       </Box>
     </Box>
   );

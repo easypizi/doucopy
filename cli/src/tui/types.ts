@@ -1,4 +1,12 @@
-export type ScreenId = "status" | "settings" | "peers" | "chat" | "setup" | "invite" | "ops";
+export type ScreenId =
+  | "status"
+  | "settings"
+  | "peers"
+  | "chat"
+  | "setup"
+  | "invite"
+  | "ops"
+  | "updates";
 
 export const SCREENS: readonly ScreenId[] = [
   "status",
@@ -8,6 +16,7 @@ export const SCREENS: readonly ScreenId[] = [
   "setup",
   "invite",
   "ops",
+  "updates",
 ] as const;
 
 export const SCREEN_LABELS: Record<ScreenId, string> = {
@@ -18,6 +27,7 @@ export const SCREEN_LABELS: Record<ScreenId, string> = {
   setup: "Setup",
   invite: "Invite",
   ops: "Ops",
+  updates: "Updates",
 };
 
 export interface LaunchOptions {
