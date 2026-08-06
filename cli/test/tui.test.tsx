@@ -129,8 +129,8 @@ describe("Settings screen", () => {
     expect(frame).toContain("Keep awake");
     expect(frame).toContain("true");
 
-    // Rows: write_mode … harness (7), then keep_awake (8)
-    for (let i = 0; i < 8; i += 1) {
+    // Rows: peer_name (0) … harness (8), then keep_awake (9)
+    for (let i = 0; i < 9; i += 1) {
       stdin.write("\u001B[B");
       await new Promise((r) => setTimeout(r, 20));
     }
@@ -150,7 +150,7 @@ describe("Settings screen", () => {
     const { lastFrame, stdin, unmount } = render(<SettingsScreen home={home} inputActive />);
     cleanups.push(unmount);
     await new Promise((r) => setTimeout(r, 50));
-    for (let i = 0; i < 8; i += 1) {
+    for (let i = 0; i < 9; i += 1) {
       stdin.write("\u001B[B");
       await new Promise((r) => setTimeout(r, 15));
     }

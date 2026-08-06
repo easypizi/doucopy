@@ -250,18 +250,43 @@ export async function loginHarness(
   return { ok: result.code === 0, stdout: result.stdout, stderr: result.stderr };
 }
 
-export function anyHarnessReadySync(): boolean {
-  // Fast PATH-only check for Status banner; auth may be stale briefly.
-  return HARNESS_IDS.some((id) => harnessBinaryPresent(id));
+/**
+ * Run harness login with inherited stdio (interactive TUI of agent CLI).
+ * Must not be called while Ink alternate-screen is active.
+ */
+export function loginWithInherit(
+  id: HarnessId,
+  opts: { spawnSyncFn?: typeof spawnSync } = {},
+): { ok: boolean; status: number | null; stdout: string; stderr: string } {
+  const spawnFn = opts.spawnSyncFn ?? spawnSync;
+  const spec = loginCommand(id);
+  const tryOne = (command: string, args: string[] = []) =>
+    spawnFn(command, args, {
+      encoding: "utf8",
+      shell: Boolean(spec.shell),
+      stdio: "inherit",
+      env: process.env,
+    });
+  let out = tryOne(spec.command, spec.args ?? []);
+  if ((out.error || out.status === 127) && spec.fallback) {
+    out = tryOne(spec.fallback.command, spec.fallback.args ?? []);
+  }
+  return {
+    ok: out.status === 0,
+    status: out.status,
+    stdout: typeof out.stdout === "string" ? out.stdout : "",
+    stderr: typeof out.stderr === "string" ? out.stderr : out.error?.message ?? "",
+  };
 }
 
-export async function ensureHarnessesInteractive(
+/** Install missing binaries only (no login). Safe inside Ink. */
+export async function installMissingHarnesses(
   selected: HarnessId[],
-  deps: ProbeDeps & { runInstall?: typeof installHarness; runLogin?: typeof loginHarness; log?: (line: string) => void } = {},
-): Promise<void> {
+  deps: ProbeDeps & { runInstall?: typeof installHarness; log?: (line: string) => void } = {},
+): Promise<HarnessId[]> {
   const log = deps.log ?? ((line: string) => console.log(line));
   const runInstall = deps.runInstall ?? installHarness;
-  const runLogin = deps.runLogin ?? loginHarness;
+  const needLogin: HarnessId[] = [];
   for (const id of selected) {
     let probe = await probeHarness(id, deps);
     if (!probe.installed) {
@@ -274,15 +299,45 @@ export async function ensureHarnessesInteractive(
       log(`Installed ${id}`);
       probe = await probeHarness(id, deps);
     }
-    if (probe.installed && !probe.authenticated) {
-      log(`Logging in to ${id} (browser may open)…`);
+    if (probe.installed && !probe.authenticated) needLogin.push(id);
+  }
+  return needLogin;
+}
+
+export function anyHarnessReadySync(): boolean {
+  // Fast PATH-only check for Status banner; auth may be stale briefly.
+  return HARNESS_IDS.some((id) => harnessBinaryPresent(id));
+}
+
+export async function ensureHarnessesInteractive(
+  selected: HarnessId[],
+  deps: ProbeDeps & {
+    runInstall?: typeof installHarness;
+    runLogin?: typeof loginHarness;
+    /** When true, login uses stdio inherit (classic CLI / post-TUI handoff). */
+    loginInherit?: boolean;
+    log?: (line: string) => void;
+  } = {},
+): Promise<void> {
+  const log = deps.log ?? ((line: string) => console.log(line));
+  const needLogin = await installMissingHarnesses(selected, deps);
+  for (const id of needLogin) {
+    log(`Logging in to ${id} (browser may open)…`);
+    if (deps.loginInherit) {
+      const logged = loginWithInherit(id);
+      if (!logged.ok) {
+        log(`Login for ${id} did not complete${logged.stderr ? `: ${logged.stderr.trim()}` : ""}`);
+        continue;
+      }
+    } else {
+      const runLogin = deps.runLogin ?? loginHarness;
       const logged = await runLogin(id);
       if (!logged.ok) {
         log(`Login for ${id} did not complete: ${(logged.stderr || logged.stdout).trim()}`);
         continue;
       }
-      log(`Authenticated ${id}`);
     }
+    log(`Authenticated ${id}`);
   }
 }
 

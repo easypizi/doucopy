@@ -91,12 +91,14 @@ export function App({
       ) : null}
       {screen === "settings" ? <SettingsScreen home={home} inputActive onSaved={snap.refresh} /> : null}
       {screen === "peers" ? <PeersScreen snap={snap} onRefresh={snap.refresh} inputActive /> : null}
-      {screen === "chat" ? <ChatScreen snap={snap} inputActive onBusyChange={setChatBusy} /> : null}
+      {screen === "chat" ? (
+        <ChatScreen snap={snap} home={home} inputActive onBusyChange={setChatBusy} />
+      ) : null}
       {screen === "setup" ? (
         <SetupScreen home={home} setupMode={setupMode} argv={argv} inputActive />
       ) : null}
       {screen === "invite" ? <InviteScreen home={home} inputActive /> : null}
-      {screen === "ops" ? <OpsScreen inputActive /> : null}
+      {screen === "ops" ? <OpsScreen home={home} inputActive /> : null}
     </>
   );
 

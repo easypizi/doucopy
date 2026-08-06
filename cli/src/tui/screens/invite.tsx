@@ -2,6 +2,7 @@ import { Box, Text, useInput } from "ink";
 import { useState } from "react";
 import { requestInvite } from "../../api.js";
 import { shellExec } from "../../exec.js";
+import { pushHistory, readHistory } from "../../field-history.js";
 import { loadRelaySecretFromHeroku } from "../../ops.js";
 import { readConfigFile } from "../../settings.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
@@ -15,6 +16,7 @@ type Step =
   | { kind: "ttl" }
   | { kind: "mode" }
   | { kind: "secret" }
+  | { kind: "app_pick" }
   | { kind: "app" }
   | { kind: "result"; invite: string; expires: number; relayUrl?: string }
   | { kind: "error"; message: string };
@@ -96,7 +98,7 @@ export function InviteScreen({ home, inputActive }: { home: string; inputActive:
         onSelect={(v) => {
           if (v === "relay") void mintViaRelay();
           else if (v === "secret") setStep({ kind: "secret" });
-          else setStep({ kind: "app" });
+          else setStep(readHistory(home).heroku_apps.length > 0 ? { kind: "app_pick" } : { kind: "app" });
         }}
       />
     );
@@ -114,17 +116,52 @@ export function InviteScreen({ home, inputActive }: { home: string; inputActive:
     );
   }
 
+  if (step.kind === "app_pick") {
+    const apps = readHistory(home).heroku_apps;
+    return (
+      <SelectModal
+        title="Heroku app name"
+        options={[
+          ...apps.map((app) => ({ value: app, label: app })),
+          { value: "__custom__", label: "Custom…" },
+        ]}
+        onCancel={() => setStep({ kind: "mode" })}
+        onSelect={(v) => {
+          if (v === "__custom__") setStep({ kind: "app" });
+          else {
+            void (async () => {
+              setBusy(true);
+              try {
+                pushHistory(home, { heroku_app: v });
+                const secret = await loadRelaySecretFromHeroku(v, shellExec);
+                await mintWithSecret(secret);
+              } catch (err) {
+                setStep({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+                setBusy(false);
+              }
+            })();
+          }
+        }}
+      />
+    );
+  }
+
   if (step.kind === "app") {
     return (
       <TextPrompt
+        key="invite_app"
         label="Heroku app name"
-        onCancel={() => setStep({ kind: "mode" })}
+        onCancel={() =>
+          setStep(readHistory(home).heroku_apps.length > 0 ? { kind: "app_pick" } : { kind: "mode" })
+        }
         validate={(v) => (/^[a-z][a-z0-9-]{2,29}$/.test(v.trim()) ? true : "invalid app name")}
         onSubmit={(app) => {
           void (async () => {
             setBusy(true);
             try {
-              const secret = await loadRelaySecretFromHeroku(app.trim(), shellExec);
+              const name = app.trim();
+              pushHistory(home, { heroku_app: name });
+              const secret = await loadRelaySecretFromHeroku(name, shellExec);
               await mintWithSecret(secret);
             } catch (err) {
               setStep({ kind: "error", message: err instanceof Error ? err.message : String(err) });

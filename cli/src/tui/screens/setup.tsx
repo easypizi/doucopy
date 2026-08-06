@@ -1,7 +1,8 @@
-import { Box, Text } from "ink";
+import { Box, Text, useApp } from "ink";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchStatus, joinRelay, normalizeRelayUrl } from "../../api.js";
 import { shellExec } from "../../exec.js";
+import { pushHistory, readHistory } from "../../field-history.js";
 import {
   NAME_PATTERN,
   NEVER_REVEAL_PRESETS,
@@ -25,10 +26,11 @@ import {
 } from "../../settings.js";
 import {
   HARNESS_IDS,
-  ensureHarnessesInteractive,
+  installMissingHarnesses,
   listInstallCandidates,
   type HarnessId,
 } from "../../harness-install.js";
+import { clearSetupResume, readSetupResume, writeSetupResume } from "../../setup-resume.js";
 import { detectAskers, detectResponders, responderHarnessDisabledReason } from "../../setup.js";
 import { areAllSkillsInstalled } from "../../skills.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
@@ -40,10 +42,12 @@ import { WizardFrame } from "../components/WizardFrame.js";
 import { theme } from "../theme.js";
 
 type Phase =
+  | { kind: "owner_app_pick" }
   | { kind: "owner_app" }
   | { kind: "owner_confirm"; app: string }
   | { kind: "owner_deploying"; app: string }
   | { kind: "reuse" }
+  | { kind: "relay_pick" }
   | { kind: "relay" }
   | { kind: "invite" }
   | { kind: "name" }
@@ -98,7 +102,7 @@ export type SetupScreenDeps = {
   clearDraft?: typeof clearDraft;
   areAllSkillsInstalled?: typeof areAllSkillsInstalled;
   listInstallCandidates?: typeof listInstallCandidates;
-  ensureHarnessesInteractive?: typeof ensureHarnessesInteractive;
+  installMissingHarnesses?: typeof installMissingHarnesses;
 };
 
 /** Test-only bootstrap to skip the interactive prefix of the wizard. */
@@ -106,6 +110,15 @@ export type SetupTestBootstrap = {
   phase: Phase;
   data: Partial<Draft>;
 };
+
+function initialRelayPhase(home: string, hasUrlFlag: boolean): Phase {
+  if (hasUrlFlag) return { kind: "relay" };
+  return readHistory(home).relay_urls.length > 0 ? { kind: "relay_pick" } : { kind: "relay" };
+}
+
+function initialOwnerPhase(home: string): Phase {
+  return readHistory(home).heroku_apps.length > 0 ? { kind: "owner_app_pick" } : { kind: "owner_app" };
+}
 
 export function SetupScreen({
   home,
@@ -121,26 +134,43 @@ export function SetupScreen({
   deps?: SetupScreenDeps;
   testBootstrap?: SetupTestBootstrap;
 }) {
+  const { exit } = useApp();
   const joinRelayFn = deps?.joinRelay ?? joinRelay;
   const finalizeJoinFn = deps?.finalizeJoin ?? finalizeJoin;
   const clearDraftFn = deps?.clearDraft ?? clearDraft;
   const skillsInstalledFn = deps?.areAllSkillsInstalled ?? areAllSkillsInstalled;
   const listCandidatesFn = deps?.listInstallCandidates ?? listInstallCandidates;
-  const ensureHarnessesFn = deps?.ensureHarnessesInteractive ?? ensureHarnessesInteractive;
+  const installMissingFn = deps?.installMissingHarnesses ?? installMissingHarnesses;
 
   const existing = useMemo(() => readExistingConnection(home), [home]);
   const draftPrefill = useMemo(() => readDraft(home), [home]);
+  const resumePrefill = useMemo(() => {
+    const resume = readSetupResume(home);
+    if (!resume || resume.pendingLogins.length > 0) return null;
+    clearSetupResume(home);
+    return resume;
+  }, [home]);
   const flagUrl = argv[0];
   const flagInvite = argv[1];
 
   const [phase, setPhase] = useState<Phase>(() => {
     if (testBootstrap) return testBootstrap.phase;
-    if (setupMode) return { kind: "owner_app" };
+    if (resumePrefill) return { kind: resumePrefill.resumePhase };
+    if (setupMode) return initialOwnerPhase(home);
     if (existing && !flagUrl && !flagInvite) return { kind: "reuse" };
-    return { kind: "relay" };
+    return initialRelayPhase(home, Boolean(flagUrl));
   });
   const [data, setData] = useState<Partial<Draft>>(() => {
     if (testBootstrap) return { ...testBootstrap.data };
+    if (resumePrefill) {
+      return {
+        restrictions: safeRestrictions(),
+        neverReveal: [],
+        askers: [],
+        wantSkills: true,
+        ...resumePrefill.draft,
+      };
+    }
     return {
       relayUrl: flagUrl ? normalizeRelayUrl(flagUrl) : draftPrefill?.relayUrl,
       invite: flagInvite ?? draftPrefill?.invite,
@@ -198,6 +228,7 @@ export function SetupScreen({
         try {
           const joined = await joinRelayFn(data.relayUrl!, data.invite!, data.peer!);
           setData((d) => ({ ...d, token: joined.token, peer: joined.peer }));
+          pushHistory(home, { relay_url: data.relayUrl!, peer_name: joined.peer });
           pushLog(`joined as "${joined.peer}"`);
           setPhase({ kind: "harness_check" });
         } catch (err) {
@@ -224,9 +255,32 @@ export function SetupScreen({
     if (phase.kind === "harness_installing") {
       ran.current = key;
       void (async () => {
-        await ensureHarnessesFn(phase.selected, {
+        const needLogin = await installMissingFn(phase.selected, {
           log: (line) => pushLog(line),
         });
+        if (needLogin.length > 0) {
+          pushLog("Login opens in this terminal after Setup briefly exits…");
+          writeSetupResume(home, {
+            draft: {
+              relayUrl: data.relayUrl,
+              invite: data.invite,
+              peer: data.peer,
+              token: data.token,
+              askers: data.askers,
+              responder: data.responder,
+              wantSkills: data.wantSkills,
+              neverReveal: data.neverReveal,
+              restrictions: data.restrictions,
+            },
+            pendingLogins: needLogin,
+            resumePhase: "askers",
+            setupMode: Boolean(setupMode),
+            argv,
+            selectedHarnesses: phase.selected,
+          });
+          exit();
+          return;
+        }
         setPhase({ kind: "askers" });
       })();
       return;
@@ -261,7 +315,10 @@ export function SetupScreen({
           neverReveal: data.neverReveal ?? [],
           restrictions: data.restrictions ?? safeRestrictions(),
         });
-        if (result.ok) clearDraftFn(home);
+        if (result.ok) {
+          clearDraftFn(home);
+          if (data.relayUrl) pushHistory(home, { relay_url: data.relayUrl, peer_name: data.peer });
+        }
         setPhase({ kind: "done", ok: result.ok, messages: [...result.messages, ...result.errors] });
       })();
     }
@@ -274,17 +331,45 @@ export function SetupScreen({
     clearDraftFn,
     skillsInstalledFn,
     listCandidatesFn,
-    ensureHarnessesFn,
+    installMissingFn,
+    setupMode,
+    argv,
+    exit,
   ]);
+
+  if (phase.kind === "owner_app_pick") {
+    const apps = readHistory(home).heroku_apps;
+    return (
+      <SelectModal
+        title="Heroku app name"
+        options={[
+          ...apps.map((app) => ({ value: app, label: app })),
+          { value: "__custom__", label: "Custom…" },
+        ]}
+        onCancel={() => undefined}
+        onSelect={(v) => {
+          if (v === "__custom__") setPhase({ kind: "owner_app" });
+          else setPhase({ kind: "owner_confirm", app: v });
+        }}
+      />
+    );
+  }
 
   if (phase.kind === "owner_app") {
     return (
       <WizardFrame title="Owner setup" step={1} total={8}>
         <TextPrompt
+          key="owner_app"
           label="Heroku app name"
           validate={(v) => (/^[a-z][a-z0-9-]{2,29}$/.test(v.trim()) ? true : "3-30 chars, lowercase")}
-          onCancel={() => undefined}
-          onSubmit={(app) => setPhase({ kind: "owner_confirm", app: app.trim() })}
+          onCancel={() =>
+            setPhase(readHistory(home).heroku_apps.length > 0 ? { kind: "owner_app_pick" } : { kind: "owner_app" })
+          }
+          onSubmit={(app) => {
+            const name = app.trim();
+            pushHistory(home, { heroku_app: name });
+            setPhase({ kind: "owner_confirm", app: name });
+          }}
         />
       </WizardFrame>
     );
@@ -294,9 +379,12 @@ export function SetupScreen({
     return (
       <ConfirmModal
         title={`Deploy relay to ${phase.app}?`}
-        onCancel={() => setPhase({ kind: "owner_app" })}
+        onCancel={() =>
+          setPhase(readHistory(home).heroku_apps.length > 0 ? { kind: "owner_app_pick" } : { kind: "owner_app" })
+        }
         onConfirm={() => {
           ran.current = "";
+          pushHistory(home, { heroku_app: phase.app });
           setPhase({ kind: "owner_deploying", app: phase.app });
         }}
       />
@@ -312,7 +400,7 @@ export function SetupScreen({
       <ConfirmModal
         title={`Reuse ${existing.peer} @ ${existing.relayUrl}?`}
         body="Yes = tweak settings with existing token. No = fresh join."
-        onCancel={() => setPhase({ kind: "relay" })}
+        onCancel={() => setPhase(initialRelayPhase(home, false))}
         onConfirm={() => {
           void (async () => {
             try {
@@ -326,9 +414,30 @@ export function SetupScreen({
               setPhase({ kind: "harness_check" });
             } catch {
               pushLog("existing token invalid, fresh join");
-              setPhase({ kind: "relay" });
+              setPhase(initialRelayPhase(home, false));
             }
           })();
+        }}
+      />
+    );
+  }
+
+  if (phase.kind === "relay_pick") {
+    const urls = readHistory(home).relay_urls;
+    return (
+      <SelectModal
+        title="Relay URL"
+        options={[
+          ...urls.map((url) => ({ value: url, label: url })),
+          { value: "__custom__", label: "Custom…" },
+        ]}
+        onCancel={() => setPhase(existing ? { kind: "reuse" } : { kind: "relay_pick" })}
+        onSelect={(v) => {
+          if (v === "__custom__") setPhase({ kind: "relay" });
+          else {
+            setData((d) => ({ ...d, relayUrl: normalizeRelayUrl(v), invite: "" }));
+            setPhase({ kind: "invite" });
+          }
         }}
       />
     );
@@ -338,12 +447,25 @@ export function SetupScreen({
     return (
       <WizardFrame title="Join" step={2} total={10}>
         <TextPrompt
+          key="relay"
           label="Relay URL"
           initial={data.relayUrl ?? ""}
           validate={(v) => (v.trim() ? true : "required")}
-          onCancel={() => setPhase(existing ? { kind: "reuse" } : { kind: "relay" })}
+          onCancel={() =>
+            setPhase(
+              existing
+                ? { kind: "reuse" }
+                : readHistory(home).relay_urls.length > 0
+                  ? { kind: "relay_pick" }
+                  : { kind: "relay" },
+            )
+          }
           onSubmit={(v) => {
-            setData((d) => ({ ...d, relayUrl: normalizeRelayUrl(v.trim()) }));
+            setData((d) => ({
+              ...d,
+              relayUrl: normalizeRelayUrl(v.trim()),
+              invite: "",
+            }));
             setPhase({ kind: "invite" });
           }}
         />
@@ -355,10 +477,13 @@ export function SetupScreen({
     return (
       <WizardFrame title="Join" step={3} total={10}>
         <TextPrompt
+          key="invite"
           label="Invite code"
           initial={data.invite ?? ""}
           validate={(v) => (v.trim() ? true : "required")}
-          onCancel={() => setPhase({ kind: "relay" })}
+          onCancel={() =>
+            setPhase(readHistory(home).relay_urls.length > 0 ? { kind: "relay_pick" } : { kind: "relay" })
+          }
           onSubmit={(v) => {
             const invite = v.trim();
             writeDraft(home, data.relayUrl!, invite);
@@ -372,11 +497,17 @@ export function SetupScreen({
 
   if (phase.kind === "name") {
     const choices = peerNameChoices();
+    const historyNames = readHistory(home).peer_names.filter(
+      (n) => !choices.some((c) => c.value === n),
+    );
     return (
       <SelectModal
         title="Peer name"
-        options={choices.map((c) => ({ value: c.value, label: c.name }))}
-        initial={defaultName() || choices[0]?.value}
+        options={[
+          ...historyNames.map((n) => ({ value: n, label: `${n} (recent)` })),
+          ...choices.map((c) => ({ value: c.value, label: c.name })),
+        ]}
+        initial={defaultName() || historyNames[0] || choices[0]?.value}
         onCancel={() => setPhase(data.token ? { kind: "askers" } : { kind: "invite" })}
         onSelect={(v) => {
           if (v === "__custom__") setPhase({ kind: "name_custom" });
@@ -436,7 +567,7 @@ export function SetupScreen({
   if (phase.kind === "harness_installing") {
     return (
       <Box flexDirection="column">
-        <Text color={theme.warn}>Installing / logging in…</Text>
+        <Text color={theme.warn}>Installing… (login opens in this terminal after Setup briefly exits)</Text>
         {log.slice(-8).map((m, i) => (
           <Text key={i} color={theme.dim}>
             {m}

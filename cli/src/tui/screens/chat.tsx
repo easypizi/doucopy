@@ -2,6 +2,7 @@ import { Box, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { askPeer, fetchReply } from "../../api.js";
+import { localAsk, resolveLocalHarness } from "../../local-ask.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { SelectModal } from "../components/SelectModal.js";
 import { theme } from "../theme.js";
@@ -9,6 +10,7 @@ import type { StatusSnapshot } from "../useStatusSnapshot.js";
 
 const REPLY_WAIT = 20;
 const REPLY_MAX = 30;
+export const LOCAL_PEER = "(local)";
 
 type FeedKind = "system" | "ask" | "reply" | "note" | "status";
 
@@ -36,6 +38,8 @@ function newId(): string {
 export type ChatScreenDeps = {
   askPeer?: typeof askPeer;
   fetchReply?: typeof fetchReply;
+  localAsk?: typeof localAsk;
+  home?: string;
 };
 
 export function ChatScreen({
@@ -44,6 +48,7 @@ export function ChatScreen({
   onBusyChange,
   deps,
   initialAsk,
+  home,
 }: {
   snap: StatusSnapshot;
   inputActive: boolean;
@@ -51,9 +56,12 @@ export function ChatScreen({
   deps?: ChatScreenDeps;
   /** Test helper: fire one ask on mount. */
   initialAsk?: { peer: string; question: string };
+  home?: string;
 }) {
   const askPeerFn = deps?.askPeer ?? askPeer;
   const fetchReplyFn = deps?.fetchReply ?? fetchReply;
+  const localAskFn = deps?.localAsk ?? localAsk;
+  const localHome = deps?.home ?? home;
   const initialAskRef = useRef(initialAsk);
   const { exit } = useApp();
   const others = useMemo(() => {
@@ -61,11 +69,16 @@ export function ChatScreen({
     return [...list].sort((a, b) => Number(b.online) - Number(a.online));
   }, [snap.peers]);
 
+  const localLabel = useMemo(() => {
+    const harness = snap.config?.responder?.harness ?? "cursor-agent";
+    return `${LOCAL_PEER} ${harness}`;
+  }, [snap.config?.responder?.harness]);
+
   const [feed, setFeed] = useState<FeedItem[]>([
     {
       id: "welcome",
       kind: "system",
-      text: "Type a question and press Enter — pick a peer from the list (no need to type their name). /ask opens the picker. /dialogs jumps threads.",
+      text: "Type a question and press Enter — pick a peer (or local agent). /ask opens the picker. /local asks this machine. /dialogs jumps threads.",
     },
   ]);
   const [dialogs, setDialogs] = useState<Dialog[]>([]);
@@ -187,7 +200,57 @@ export function ChatScreen({
     }
   };
 
+  const sendLocalAsk = async (question: string) => {
+    if (!snap.config) {
+      push({ kind: "system", text: "No config. Join first (Setup)." });
+      return;
+    }
+    if (!localHome) {
+      push({ kind: "system", text: "Local ask unavailable (missing home path)." });
+      return;
+    }
+    const resolved = resolveLocalHarness(snap.config);
+    if ("error" in resolved) {
+      push({ kind: "system", text: resolved.error });
+      return;
+    }
+    const peer = LOCAL_PEER;
+    const current =
+      dialogsRef.current.find((d) => d.id === activeRef.current && d.peer === peer) ??
+      dialogsRef.current.find((d) => d.peer === peer);
+    const { id: dialogId, conversationId: conv } = upsertDialog(peer, current?.conversationId ?? null);
+    push({ kind: "ask", peer, dialogId, text: question, pending: true });
+    setPending((n) => n + 1);
+    try {
+      const r = await localAskFn({
+        home: localHome,
+        question,
+        conversationId: conv,
+        config: snap.config,
+      });
+      if (r.conversationId) upsertDialog(peer, r.conversationId);
+      if (r.error) {
+        push({ kind: "status", peer, dialogId, text: `error: ${r.error}` });
+        return;
+      }
+      push({ kind: "reply", peer, dialogId, text: r.answer ?? "" });
+    } catch (err) {
+      push({
+        kind: "status",
+        peer,
+        dialogId,
+        text: `error: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    } finally {
+      setPending((n) => Math.max(0, n - 1));
+    }
+  };
+
   const sendAsk = async (peer: string, question: string) => {
+    if (peer === LOCAL_PEER) {
+      await sendLocalAsk(question);
+      return;
+    }
     if (!snap.config?.relay_url || !snap.config.token) return;
     const current =
       dialogsRef.current.find((d) => d.id === activeRef.current && d.peer === peer) ??
@@ -247,27 +310,24 @@ export function ChatScreen({
   }, []);
 
   const openAskPicker = (question?: string) => {
-    if (others.length === 0) {
-      push({ kind: "system", text: "No peers online/known yet. Wait for status or check Setup." });
-      return;
-    }
-    if (others.length === 1) {
-      const name = others[0]!.name;
-      setAskPeerName(name);
-      upsertDialog(name, null);
-      if (question) {
-        void sendAsk(name, question);
-      } else {
-        push({
-          kind: "system",
-          peer: name,
-          text: `ASK TARGET → ${name}. Type the question and press Enter.`,
-        });
-      }
-      return;
-    }
     setPendingQuestion(question ?? null);
     setMode("pick_ask");
+  };
+
+  const selectAskTarget = (name: string, question?: string | null) => {
+    setAskPeerName(name);
+    upsertDialog(name, null);
+    setPendingQuestion(null);
+    setMode("feed");
+    if (question) {
+      void sendAsk(name, question);
+    } else {
+      push({
+        kind: "system",
+        peer: name,
+        text: `ASK TARGET → ${name === LOCAL_PEER ? localLabel : name}. Type the question and press Enter.`,
+      });
+    }
   };
 
   const handleLine = (raw: string) => {
@@ -289,6 +349,16 @@ export function ChatScreen({
         kind: "system",
         text: "Cleared ask target + feed filter. Type a question (picker) or /ask.",
       });
+      return;
+    }
+    if (line === "/local") {
+      selectAskTarget(LOCAL_PEER);
+      return;
+    }
+    if (line.startsWith("/local ")) {
+      const question = line.slice("/local ".length).trim();
+      if (question) void sendAsk(LOCAL_PEER, question);
+      else selectAskTarget(LOCAL_PEER);
       return;
     }
     if (line === "/ask" || line === "/a") {
@@ -356,7 +426,7 @@ export function ChatScreen({
     if (line.startsWith("/")) {
       push({
         kind: "system",
-        text: "Commands: /ask · /clear · /dialogs · /all · /new · /quit",
+        text: "Commands: /ask · /local · /clear · /dialogs · /all · /new · /quit",
       });
       return;
     }
@@ -422,32 +492,20 @@ export function ChatScreen({
         description={
           pendingQuestion
             ? `Then send: “${pendingQuestion.slice(0, 60)}${pendingQuestion.length > 60 ? "…" : ""}”`
-            : "↑↓ choose peer · Enter. You never need to type their full name."
+            : "↑↓ choose · Enter. Local = this machine's harness (no relay)."
         }
-        options={others.map((p) => ({
-          value: p.name,
-          label: `${p.online ? "●" : "○"} ${p.name}`,
-        }))}
+        options={[
+          { value: LOCAL_PEER, label: `◆ ${localLabel}` },
+          ...others.map((p) => ({
+            value: p.name,
+            label: `${p.online ? "●" : "○"} ${p.name}`,
+          })),
+        ]}
         onCancel={() => {
           setPendingQuestion(null);
           setMode("feed");
         }}
-        onSelect={(name) => {
-          setAskPeerName(name);
-          upsertDialog(name, null);
-          const question = pendingQuestion;
-          setPendingQuestion(null);
-          setMode("feed");
-          if (question) {
-            void sendAsk(name, question);
-          } else {
-            push({
-              kind: "system",
-              peer: name,
-              text: `ASK TARGET → ${name}. Type the question and press Enter.`,
-            });
-          }
-        }}
+        onSelect={(name) => selectAskTarget(name, pendingQuestion)}
       />
     );
   }
@@ -490,6 +548,7 @@ export function ChatScreen({
   }
 
   const target = askPeerName ?? dialogs.find((d) => d.id === (filterDialogId ?? activeDialogId))?.peer;
+  const targetLabel = target === LOCAL_PEER ? localLabel : target;
 
   return (
     <Box flexDirection="column" flexGrow={1}>
@@ -511,7 +570,7 @@ export function ChatScreen({
             <>
               <Text color={theme.dim}> · next ask → </Text>
               <Text color={theme.highlight} bold>
-                {target}
+                {targetLabel}
               </Text>
               <Text color={theme.dim}> (Esc or /clear to leave)</Text>
             </>
@@ -540,7 +599,7 @@ export function ChatScreen({
             value={value}
             placeholder={
               target
-                ? `Question for ${target}… (Enter sends)`
+                ? `Question for ${targetLabel}… (Enter sends)`
                 : "Type a question · Enter · pick peer from list"
             }
             onChange={setValue}
@@ -552,7 +611,7 @@ export function ChatScreen({
       </Box>
       <Box marginTop={1}>
         <Text color={theme.dim}>
-          Enter send · Esc//clear leave ask · /ask · /dialogs · /quit
+          Enter send · Esc//clear leave ask · /ask · /local · /dialogs · /quit
           {pending > 0 ? ` · ${pending} in flight` : ""}
         </Text>
       </Box>

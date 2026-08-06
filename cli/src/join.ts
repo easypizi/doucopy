@@ -4,6 +4,7 @@ import { hostname, homedir, userInfo } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { fetchStatus, joinRelay, normalizeRelayUrl } from "./api.js";
+import { pushHistory } from "./field-history.js";
 import { installDaemon, responderDaemonSupported } from "./launchd.js";
 import { areAllSkillsInstalled, installGlobalSkills, type SkillsClient } from "./skills.js";
 import {
@@ -452,7 +453,8 @@ export async function runJoin(argv: string[]): Promise<void> {
         })),
       });
       if (chosen.length > 0) {
-        await ensureHarnessesInteractive(chosen);
+        // Outside Ink: login can use inherited stdio for agent CLIs with their own TUI.
+        await ensureHarnessesInteractive(chosen, { loginInherit: true });
       }
     }
   }
@@ -545,6 +547,7 @@ export async function finalizeJoin(home: string, input: JoinFinalizeInput): Prom
   }
   const configFile = writeConfig(home, base);
   messages.push(`wrote ${configFile}`);
+  pushHistory(home, { relay_url: input.relayUrl, peer_name: input.peer });
   if (writeDefaultPolicy(home, input.neverReveal)) messages.push("wrote default ~/.doucopy/policy.md");
 
   if (input.askers.includes("cursor")) messages.push(`updated ${mergeMcpJson(home, input.relayUrl, input.token)}`);
