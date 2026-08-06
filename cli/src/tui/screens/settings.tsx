@@ -1,10 +1,9 @@
 import { Box, Text, useInput } from "ink";
 import { homedir } from "node:os";
 import { useMemo, useRef, useState } from "react";
-import { joinRelay } from "../../api.js";
-import { pushHistory } from "../../field-history.js";
 import { NAME_PATTERN } from "../../join.js";
 import { RESPONDER_DAEMON_UNSUPPORTED, responderDaemonSupported, startDaemon, stopDaemon } from "../../launchd.js";
+import { renamePeer } from "../../rename-peer.js";
 import {
   READ_DENY_PRESETS,
   REDACT_LITERAL_PRESETS,
@@ -29,16 +28,7 @@ import {
   type ShellMode,
 } from "../../settings.js";
 import { runPolicy } from "../../policy.js";
-import {
-  detectAskers,
-  detectResponders,
-  mergeClaudeMcp,
-  mergeCodexToml,
-  mergeMcpJson,
-  responderHarnessDisabledReason,
-  writeConfig,
-  type HarnessKind,
-} from "../../setup.js";
+import { detectResponders, responderHarnessDisabledReason, writeConfig, type HarnessKind } from "../../setup.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { FooterHints } from "../components/FooterHints.js";
 import { ListEditor } from "../components/ListEditor.js";
@@ -53,7 +43,8 @@ type Editor =
   | { kind: "text"; field: string }
   | { kind: "discard" }
   | { kind: "restart" }
-  | { kind: "peer_invite"; newName: string };
+  | { kind: "peer_confirm"; newName: string }
+  | { kind: "peer_busy"; newName: string };
 
 interface Row {
   id: string;
@@ -536,47 +527,35 @@ export function SettingsScreen({
     }
   }
 
-  if (editor.kind === "peer_invite") {
+  if (editor.kind === "peer_busy") {
+    return <Text color={theme.warn}>Renaming to {editor.newName}…</Text>;
+  }
+
+  if (editor.kind === "peer_confirm") {
     return (
-      <TextPrompt
-        key="peer_invite"
-        label={`Invite code to rename → ${editor.newName}`}
-        validate={(v) => (v.trim() ? true : "need a fresh invite to rename")}
+      <ConfirmModal
+        title={`Rename peer to "${editor.newName}"?`}
+        body="Mints a one-time invite with your current token, rejoins, updates MCP, restarts daemon if enabled."
         onCancel={() => setEditor({ kind: "text", field: "peer_name" })}
-        onSubmit={(invite) => {
+        onConfirm={() => {
+          setEditor({ kind: "peer_busy", newName: editor.newName });
           void (async () => {
-            if (!draft.relay_url) {
-              setMessage("missing relay_url");
-              setEditor({ kind: "none" });
-              return;
-            }
             try {
-              const joined = await joinRelay(draft.relay_url, invite.trim(), editor.newName);
-              const next: DoucopyConfigFile = {
-                ...draft,
-                self_peer: joined.peer,
-                token: joined.token,
-              };
-              writeConfig(home, next);
-              const askers = detectAskers(home);
-              if (askers.cursor) mergeMcpJson(home, draft.relay_url, joined.token);
-              if (askers.claude) mergeClaudeMcp(home, draft.relay_url, joined.token);
-              if (askers.codex) mergeCodexToml(home, draft.relay_url, joined.token);
-              pushHistory(home, { peer_name: joined.peer, relay_url: draft.relay_url });
-              setDraft(next);
-              setBaseline(JSON.stringify(next));
+              const result = await renamePeer(home, draft, editor.newName);
+              setDraft(result.config);
+              setBaseline(JSON.stringify(result.config));
               if (restartOnSave && responderDaemonSupported()) {
                 try {
                   stopDaemon(home);
                   startDaemon(home);
-                  setMessage(`renamed to ${joined.peer}; daemon restarted`);
+                  setMessage(`renamed to ${result.peer}; daemon restarted`);
                 } catch (err) {
                   setMessage(
-                    `renamed to ${joined.peer}; restart failed: ${err instanceof Error ? err.message : String(err)}`,
+                    `renamed to ${result.peer}; restart failed: ${err instanceof Error ? err.message : String(err)}`,
                   );
                 }
               } else {
-                setMessage(`renamed to ${joined.peer} (saved)`);
+                setMessage(`renamed to ${result.peer} (saved)`);
               }
               onSaved?.();
             } catch (err) {
@@ -594,7 +573,7 @@ export function SettingsScreen({
       return (
         <TextPrompt
           key="peer_name"
-          label="New peer name (needs a fresh invite)"
+          label="New peer name"
           initial={draft.self_peer ?? ""}
           validate={(v) => (NAME_PATTERN.test(v.trim()) ? true : "must match [A-Za-z0-9._-]{1,64}")}
           onCancel={() => setEditor({ kind: "none" })}
@@ -605,7 +584,7 @@ export function SettingsScreen({
               setEditor({ kind: "none" });
               return;
             }
-            setEditor({ kind: "peer_invite", newName: name });
+            setEditor({ kind: "peer_confirm", newName: name });
           }}
         />
       );
