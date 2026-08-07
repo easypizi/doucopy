@@ -1,6 +1,29 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
 import { packageRoot } from "./launchd.js";
+
+/** True if path exists, including as a dangling symlink (existsSync is false for those). */
+function entryPresent(p: string): boolean {
+  try {
+    lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeEntry(p: string): void {
+  rmSync(p, { recursive: true, force: true });
+}
 
 // User-facing skills we ship. The maintainer-only ones (dev, relay, privacy,
 // setup) stay inside the repo and are never installed into a user's home.
@@ -108,16 +131,16 @@ export function removeGlobalDoucopySkills(home: string): string[] {
     if (!existsSync(dst)) continue;
     for (const name of names) {
       const dir = path.join(dst, name);
-      if (!existsSync(dir)) continue;
-      rmSync(dir, { recursive: true, force: true });
+      if (!entryPresent(dir)) continue;
+      removeEntry(dir);
       removed.push(dir);
     }
-    // Also wipe any other doucopy-* leftovers.
+    // Also wipe any other doucopy-* leftovers (real dirs or dangling symlinks).
     for (const entry of readdirSync(dst)) {
       if (!entry.startsWith("doucopy-")) continue;
       const dir = path.join(dst, entry);
-      if (!existsSync(dir)) continue;
-      rmSync(dir, { recursive: true, force: true });
+      if (!entryPresent(dir)) continue;
+      removeEntry(dir);
       if (!removed.includes(dir)) removed.push(dir);
     }
   }
@@ -131,17 +154,29 @@ export function installGlobalSkills(opts: InstallSkillsOptions): InstalledSkill[
     const dst = targetDir(opts.home, client);
     mkdirSync(dst, { recursive: true });
     for (const legacy of LEGACY_SKILLS) {
-      rmSync(path.join(dst, legacy), { recursive: true, force: true });
+      removeEntry(path.join(dst, legacy));
     }
     for (const skill of SHIPPED_SKILLS) {
       const from = path.join(source, skill);
       if (!existsSync(from)) continue;
       const to = path.join(dst, skill);
-      const existed = existsSync(to);
-      if (existed && treesEqual(from, to)) {
+      const existed = entryPresent(to);
+      // Skip only when the real tree already matches. Dangling (or any) symlinks
+      // must be replaced: cpSync follows them and ENOENTs when the target is gone
+      // (common after a repo rename left ~/.cursor/skills/doucopy-* → old path).
+      let isSymlink = false;
+      if (existed) {
+        try {
+          isSymlink = lstatSync(to).isSymbolicLink();
+        } catch {
+          isSymlink = false;
+        }
+      }
+      if (existed && !isSymlink && treesEqual(from, to)) {
         result.push({ client, skill, path: to, status: "unchanged" });
         continue;
       }
+      if (existed) removeEntry(to);
       cpSync(from, to, { recursive: true, force: true });
       result.push({
         client,

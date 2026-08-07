@@ -1,8 +1,21 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { areAllSkillsInstalled, installGlobalSkills, SHIPPED_SKILLS } from "../src/skills.js";
+import {
+  areAllSkillsInstalled,
+  installGlobalSkills,
+  removeGlobalDoucopySkills,
+  SHIPPED_SKILLS,
+} from "../src/skills.js";
 
 function makeSourceDir(): string {
   const dir = mkdtempSync(path.join(tmpdir(), "doucopy-skills-src-"));
@@ -98,5 +111,32 @@ describe("installGlobalSkills", () => {
     writeFileSync(path.join(legacyDir, "SKILL.md"), "stale");
     installGlobalSkills({ home, clients: ["cursor"], sourceDir: source });
     expect(existsSync(legacyDir)).toBe(false);
+  });
+
+  it("replaces a broken destination symlink instead of failing with ENOENT", () => {
+    const home = makeHome();
+    const source = makeSourceDir();
+    const cursorSkills = path.join(home, ".cursor/skills");
+    mkdirSync(cursorSkills, { recursive: true });
+    const broken = path.join(cursorSkills, "doucopy-ask");
+    symlinkSync(path.join(home, "missing-old-repo/doucopy-ask"), broken);
+    expect(existsSync(broken)).toBe(false);
+    expect(lstatSync(broken).isSymbolicLink()).toBe(true);
+
+    const installed = installGlobalSkills({ home, clients: ["cursor"], sourceDir: source });
+    expect(installed.some((r) => r.skill === "doucopy-ask")).toBe(true);
+    expect(lstatSync(broken).isSymbolicLink()).toBe(false);
+    expect(readFileSync(path.join(broken, "SKILL.md"), "utf8")).toContain("# doucopy-ask");
+  });
+
+  it("removeGlobalDoucopySkills deletes broken doucopy-* symlinks", () => {
+    const home = makeHome();
+    const cursorSkills = path.join(home, ".cursor/skills");
+    mkdirSync(cursorSkills, { recursive: true });
+    const broken = path.join(cursorSkills, "doucopy-ask");
+    symlinkSync(path.join(home, "gone/doucopy-ask"), broken);
+    const removed = removeGlobalDoucopySkills(home);
+    expect(removed).toContain(broken);
+    expect(() => lstatSync(broken)).toThrow();
   });
 });
