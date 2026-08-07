@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Mailbox } from "../src/mailbox.js";
+import { Mailbox, PEER_RETENTION_MS } from "../src/mailbox.js";
 
 describe("Mailbox", () => {
   beforeEach(() => vi.useFakeTimers());
@@ -163,6 +163,16 @@ describe("Mailbox", () => {
     expect(box.knownPeers()).toEqual(["work"]);
   });
 
+  it("drops known peers after PEER_RETENTION_MS without a poll", async () => {
+    const box = new Mailbox();
+    const poll = box.takeNext("ghost", 30_000);
+    expect(box.knownPeers()).toEqual(["ghost"]);
+    vi.advanceTimersByTime(PEER_RETENTION_MS);
+    expect(box.knownPeers()).toEqual([]);
+    vi.advanceTimersByTime(30_000);
+    await poll;
+  });
+
   it("counts queued questions per peer", () => {
     const box = new Mailbox();
     expect(box.queuedCount("work")).toBe(0);
@@ -170,6 +180,19 @@ describe("Mailbox", () => {
     box.enqueue("work", "personal", "q2");
     expect(box.queuedCount("work")).toBe(2);
     expect(box.queuedCount("personal")).toBe(0);
+  });
+
+  it("openIncomingCount includes tickets taken from the inbox but not yet settled", async () => {
+    const box = new Mailbox();
+    box.enqueue("work", "personal", "q1");
+    box.enqueue("work", "personal", "q2");
+    expect(box.openIncomingCount("work")).toBe(2);
+    const taken = await box.takeNext("work", 0);
+    expect(taken?.question).toBe("q1");
+    expect(box.queuedCount("work")).toBe(1);
+    expect(box.openIncomingCount("work")).toBe(2);
+    box.settle(taken!.ticket_id, { answer: "done" });
+    expect(box.openIncomingCount("work")).toBe(1);
   });
 
   it("rejects hops beyond MAX_HOPS", () => {

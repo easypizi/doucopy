@@ -343,6 +343,82 @@ describe("App shell", () => {
     expect(lastFrame()).toContain("Press Ctrl+C again to quit");
     // Still mounted: second press would exit. We only assert the confirm hint.
   });
+
+  it("letter c jumps to Chat from Status when not typing", async () => {
+    const home = writeConfigHome();
+    const { lastFrame, stdin, unmount } = render(<App home={home} initialScreen="status" />);
+    cleanups.push(unmount);
+    await new Promise((r) => setTimeout(r, 80));
+    stdin.write("c");
+    await new Promise((r) => setTimeout(r, 80));
+    const frame = lastFrame() ?? "";
+    expect(frame).toMatch(/\/ask|Type a question|local/i);
+  });
+
+  it("letter c stays in a TextPrompt field (does not jump to Chat)", async () => {
+    const home = writeConfigHome();
+    const { lastFrame, stdin, unmount } = render(<App home={home} initialScreen="peers" />);
+    cleanups.push(unmount);
+    await new Promise((r) => setTimeout(r, 80));
+    stdin.write("a"); // Peers: open custom peer TextPrompt
+    await new Promise((r) => setTimeout(r, 80));
+    expect(lastFrame()).toContain("Peer name to pause");
+    stdin.write("connector");
+    await new Promise((r) => setTimeout(r, 80));
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Peer name to pause");
+    expect(frame).toContain("connector");
+    expect(frame).not.toMatch(/Type a question and Enter/);
+  });
+
+  it("letter q does not arm quit while Setup TextPrompt is open", async () => {
+    const home = writeConfigHome();
+    const { lastFrame, stdin, unmount } = render(<App home={home} initialScreen="setup" />);
+    cleanups.push(unmount);
+    await new Promise((r) => setTimeout(r, 100));
+    stdin.write("q");
+    await new Promise((r) => setTimeout(r, 80));
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("Press Ctrl+C again to quit");
+  });
+});
+
+describe("Chat stale ask target", () => {
+  it("clears askPeerName restored from history when peer is missing from status", async () => {
+    const { ChatScreen } = await import("../src/tui/screens/chat.js");
+    const { saveChatHistory, CHAT_HISTORY_SCHEMA } = await import("../src/chat-history.js");
+    const home = mkdtempSync(path.join(tmpdir(), "doucopy-chat-stale-"));
+    mkdirSync(path.join(home, ".doucopy"), { recursive: true });
+    saveChatHistory(home, {
+      schema_version: CHAT_HISTORY_SCHEMA,
+      dialogs: [],
+      feed: [{ id: "f1", kind: "system", text: "old" }],
+      activeDialogId: null,
+      filterDialogId: null,
+      askPeerName: "GhostPeer",
+      updatedAt: 1,
+    });
+    const snap = emptySnap({
+      joined: true,
+      relayOk: true,
+      config: {
+        self_peer: "Ivan",
+        relay_url: "https://r.example.com",
+        token: "tok",
+        responder: { model: "composer-2.5", harness: "cursor-agent" },
+      },
+      peers: [
+        { name: "Ivan", online: true, self: true },
+        { name: "work", online: true, self: false },
+      ],
+    });
+    const { lastFrame, unmount } = render(<ChatScreen snap={snap} home={home} inputActive />);
+    cleanups.push(unmount);
+    await new Promise((r) => setTimeout(r, 120));
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Previous target GhostPeer is not on the network");
+    expect(frame).not.toMatch(/\/ask GhostPeer>/);
+  });
 });
 
 describe("SelectModal back", () => {

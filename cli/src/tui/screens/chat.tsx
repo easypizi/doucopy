@@ -12,6 +12,7 @@ import {
 import { localAsk, resolveLocalHarness } from "../../local-ask.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { SelectModal } from "../components/SelectModal.js";
+import { useHoldKeyCapture } from "../key-capture.js";
 import { theme } from "../theme.js";
 import type { StatusSnapshot } from "../useStatusSnapshot.js";
 
@@ -85,6 +86,8 @@ export function ChatScreen({
   const activeRef = useRef(activeDialogId);
   const primedRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const staleClearedRef = useRef<string | null>(null);
+  useHoldKeyCapture(inputActive && mode === "feed");
 
   useEffect(() => {
     if (!localHome) {
@@ -100,6 +103,31 @@ export function ChatScreen({
     if (hist.askPeerName || hist.activeDialogId) primedRef.current = true;
     setHydrated(true);
   }, [localHome]);
+
+  // Drop restored ask targets that are no longer on the relay peer list (rename ghosts).
+  useEffect(() => {
+    if (!hydrated || !askPeerName) return;
+    if (askPeerName === LOCAL_PEER) return;
+    // Wait for a live /status snapshot so an empty peers list is authoritative.
+    if (!snap.joined || !snap.relayOk) return;
+    const known = new Set(others.map((p) => p.name));
+    if (known.has(askPeerName)) {
+      staleClearedRef.current = null;
+      return;
+    }
+    if (staleClearedRef.current === askPeerName) return;
+    staleClearedRef.current = askPeerName;
+    const gone = askPeerName;
+    setAskPeerName(null);
+    setFeed((prev) => [
+      ...prev,
+      {
+        id: newId(),
+        kind: "system",
+        text: `Previous target ${gone} is not on the network. /ask to pick a peer.`,
+      },
+    ]);
+  }, [hydrated, askPeerName, others, snap.joined, snap.relayOk]);
 
   useEffect(() => {
     dialogsRef.current = dialogs;

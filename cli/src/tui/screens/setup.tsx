@@ -39,6 +39,7 @@ import { ListEditor } from "../components/ListEditor.js";
 import { SelectModal } from "../components/SelectModal.js";
 import { TextPrompt } from "../components/TextPrompt.js";
 import { WizardFrame } from "../components/WizardFrame.js";
+import { useHoldKeyCapture } from "../key-capture.js";
 import { theme } from "../theme.js";
 
 type Phase =
@@ -135,6 +136,8 @@ export function SetupScreen({
   testBootstrap?: SetupTestBootstrap;
 }) {
   const { exit } = useApp();
+  // Whole Setup wizard types or selects; never let App steal q/c.
+  useHoldKeyCapture(true);
   const joinRelayFn = deps?.joinRelay ?? joinRelay;
   const finalizeJoinFn = deps?.finalizeJoin ?? finalizeJoin;
   const clearDraftFn = deps?.clearDraft ?? clearDraft;

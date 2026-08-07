@@ -5,6 +5,7 @@ import { FooterHints } from "./components/FooterHints.js";
 import { Panel } from "./components/Panel.js";
 import { TabBar } from "./components/TabBar.js";
 import { Header } from "./header.js";
+import { KeyCaptureProvider, useKeyCapture } from "./key-capture.js";
 import { ChatScreen } from "./screens/chat.js";
 import { InviteScreen } from "./screens/invite.js";
 import { OpsScreen } from "./screens/ops.js";
@@ -20,7 +21,7 @@ import { useStatusSnapshot } from "./useStatusSnapshot.js";
 /** Second Ctrl+C / q within this window exits. */
 export const QUIT_CONFIRM_MS = 2000;
 
-export function App({
+function AppShell({
   home,
   initialScreen = "status",
   argv = [],
@@ -32,6 +33,7 @@ export function App({
   setupMode?: boolean;
 }) {
   const { exit } = useApp();
+  const { captured } = useKeyCapture();
   const win = useWindowSize();
   const columns = Math.max(win.columns || 0, 60);
   const rows = Math.max(win.rows || 0, 20);
@@ -70,11 +72,20 @@ export function App({
       requestQuit();
       return;
     }
+    // While a text field / wizard holds capture, only Ctrl+C and Tab remain.
+    if (captured) {
+      if (key.tab) {
+        const delta = key.shift ? -1 : 1;
+        const next = SCREENS[(screenIndex + delta + SCREENS.length) % SCREENS.length]!;
+        setScreen(next);
+      }
+      return;
+    }
     if (input === "q" && screen !== "chat") {
       requestQuit();
       return;
     }
-    // Quick jump to Chat from browse screens (not while typing in Settings/Setup).
+    // Quick jump to Chat from browse screens (not while typing).
     if (
       input === "c"
       && (screen === "status" || screen === "peers" || screen === "invite" || screen === "ops" || screen === "updates")
@@ -148,6 +159,19 @@ export function App({
         <FooterHints hints={baseHints} />
       </Box>
     </Box>
+  );
+}
+
+export function App(props: {
+  home: string;
+  initialScreen?: ScreenId;
+  argv?: string[];
+  setupMode?: boolean;
+}) {
+  return (
+    <KeyCaptureProvider>
+      <AppShell {...props} />
+    </KeyCaptureProvider>
   );
 }
 

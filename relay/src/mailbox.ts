@@ -5,6 +5,8 @@ const QUESTION_TTL_MS = 24 * 60 * 60 * 1000;
 const RETENTION_MS = QUESTION_TTL_MS;
 const INBOX_LIMIT = 100;
 const ONLINE_WINDOW_MS = 60_000;
+/** Drop peers from list_peers /status after this without an inbox poll (rename ghosts). */
+export const PEER_RETENTION_MS = 5 * 60_000;
 export const MAX_HOPS = 1;
 export const MAX_OPEN_PER_CONVERSATION = 4;
 
@@ -208,11 +210,21 @@ export class Mailbox {
   }
 
   knownPeers(): string[] {
+    this.pruneLastSeen();
     return [...this.lastSeen.keys()];
   }
 
   queuedCount(peer: string): number {
     return this.inbox.get(peer)?.length ?? 0;
+  }
+
+  /** Unsettled tickets addressed to this peer (still in inbox or already taken by the daemon). */
+  openIncomingCount(peer: string): number {
+    let n = 0;
+    for (const entry of this.pending.values()) {
+      if (entry.peer === peer && !entry.settled) n += 1;
+    }
+    return n;
   }
 
   outgoingFor(peer: string): OutgoingTicket[] {
@@ -233,11 +245,18 @@ export class Mailbox {
     return { status: "answered", answer: entry.answer ?? "" };
   }
 
+  private pruneLastSeen(now = Date.now()): void {
+    for (const [peer, seen] of this.lastSeen) {
+      if (now - seen >= PEER_RETENTION_MS) this.lastSeen.delete(peer);
+    }
+  }
+
   private cleanup(): void {
     if (this.cleaning) return;
     this.cleaning = true;
     const now = Date.now();
     try {
+      this.pruneLastSeen(now);
       for (const [peer, queue] of this.inbox) {
         const expired = queue.filter((q) => q.deadline <= now);
         this.inbox.set(peer, queue.filter((q) => q.deadline > now));

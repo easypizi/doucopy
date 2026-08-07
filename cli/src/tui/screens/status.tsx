@@ -110,7 +110,7 @@ export function StatusScreen({
     <Panel title="Activity" flexGrow={1}>
       <Box marginTop={1} flexDirection="column">
         <Text>
-          <Text color={theme.dim}>incoming queued  </Text>
+          <Text color={theme.dim}>incoming open    </Text>
           <Text color={(snap.status?.incoming_queued ?? 0) > 0 ? theme.warn : theme.highlight} bold>
             {snap.status?.incoming_queued ?? 0}
           </Text>

@@ -351,4 +351,24 @@ describe("GET /status", () => {
       outgoing: [{ ticket_id, to_peer: "work", status: "pending" }],
     });
   });
+
+  it("counts incoming as open (queued or taken) until the responder settles", async () => {
+    const ctx = makeApp();
+    const { ticket_id } = ctx.mailbox.enqueue("work", "personal", "hi");
+    const taken = await ctx.mailbox.takeNext("work", 0);
+    expect(taken?.ticket_id).toBe(ticket_id);
+    const whileWorking = await ctx.app.inject({
+      method: "GET",
+      url: "/status",
+      headers: { authorization: `Bearer ${ctx.workToken}` },
+    });
+    expect(whileWorking.json()).toMatchObject({ incoming_queued: 1 });
+    ctx.mailbox.settle(ticket_id, { answer: "ok" }, "work");
+    const after = await ctx.app.inject({
+      method: "GET",
+      url: "/status",
+      headers: { authorization: `Bearer ${ctx.workToken}` },
+    });
+    expect(after.json()).toMatchObject({ incoming_queued: 0 });
+  });
 });

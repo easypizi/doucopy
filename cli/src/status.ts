@@ -48,7 +48,7 @@ export async function runStatus(): Promise<void> {
       }
     }
     console.log("");
-    console.log(c.dim(`incoming queued: ${status.incoming_queued}`));
+    console.log(c.dim(`incoming open: ${status.incoming_queued}`));
   } catch (err) {
     console.error(`could not reach the relay: ${err instanceof Error ? err.message : String(err)}`);
     process.exitCode = 1;

@@ -1,6 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { useState } from "react";
+import { useHoldKeyCapture } from "../key-capture.js";
 import { theme } from "../theme.js";
 
 export function TextPrompt({
@@ -23,6 +24,7 @@ export function TextPrompt({
 }) {
   const [value, setValue] = useState(initial);
   const [error, setError] = useState<string | null>(null);
+  useHoldKeyCapture(true);
 
   useInput((_input, key) => {
     if (key.escape) onCancel();

@@ -163,7 +163,10 @@ export function registerRest(app: FastifyInstance, mailbox: Mailbox, tokens: Tok
         .knownPeers()
         .filter((name) => name !== peer)
         .map((name) => ({ name, online: mailbox.isOnline(name) })),
-      incoming_queued: mailbox.queuedCount(peer),
+      // Open incoming = queued in inbox OR already delivered to the daemon but
+      // not yet answered. Inbox depth alone stays 0 for almost the whole ask
+      // (long-poll takes the ticket immediately).
+      incoming_queued: mailbox.openIncomingCount(peer),
       outgoing: mailbox.outgoingFor(peer),
     };
   });

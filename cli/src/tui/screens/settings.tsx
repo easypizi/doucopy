@@ -1,6 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import { homedir } from "node:os";
 import { useMemo, useRef, useState } from "react";
+import { useHoldKeyCapture } from "../key-capture.js";
 import { NAME_PATTERN } from "../../join.js";
 import { RESPONDER_DAEMON_UNSUPPORTED, responderDaemonSupported, startDaemon, stopDaemon } from "../../launchd.js";
 import { renamePeer } from "../../rename-peer.js";
@@ -167,6 +168,7 @@ export function SettingsScreen({
   const [cursor, setCursor] = useState(0);
   const [editor, setEditor] = useState<Editor>({ kind: "none" });
   const [message, setMessage] = useState<string | null>(null);
+  useHoldKeyCapture(filtering || editor.kind !== "none");
 
   const dirty = draft !== null && JSON.stringify(draft) !== baseline;
   const rows = useMemo(() => (draft ? buildRows(draft, restartOnSave) : []), [draft, restartOnSave]);
