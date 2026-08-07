@@ -1,7 +1,14 @@
 import { Box, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { askPeer, fetchReply } from "../../api.js";
+import {
+  answerIncomingTicket,
+  askPeer,
+  cancelIncomingTicket,
+  fetchReply,
+  type AskMode,
+  type IncomingTicket,
+} from "../../api.js";
 import {
   loadChatHistory,
   saveChatHistory,
@@ -12,6 +19,7 @@ import {
 import { localAsk, resolveLocalHarness } from "../../local-ask.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { SelectModal } from "../components/SelectModal.js";
+import { TextPrompt } from "../components/TextPrompt.js";
 import { useHoldKeyCapture } from "../key-capture.js";
 import { theme } from "../theme.js";
 import type { StatusSnapshot } from "../useStatusSnapshot.js";
@@ -22,15 +30,33 @@ export const LOCAL_PEER = "(local)";
 
 type FeedItem = ChatFeedItem;
 type Dialog = ChatDialog;
+type ScreenMode =
+  | "feed"
+  | "pick_ask"
+  | "pick_dialog"
+  | "pick_incoming"
+  | "incoming_action"
+  | "incoming_reply"
+  | "incoming_cancel"
+  | "quit";
 
 function newId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function phaseStatusLine(phase: string | undefined, ticketId: string, offline: boolean): string {
+  const short = ticketId.slice(0, 8);
+  if (offline) return `queued offline · ticket ${short}`;
+  if (phase === "working") return `sent · answering · ticket ${short}`;
+  return `sent · queued · ticket ${short}`;
 }
 
 export type ChatScreenDeps = {
   askPeer?: typeof askPeer;
   fetchReply?: typeof fetchReply;
   localAsk?: typeof localAsk;
+  cancelIncomingTicket?: typeof cancelIncomingTicket;
+  answerIncomingTicket?: typeof answerIncomingTicket;
   home?: string;
 };
 
@@ -53,6 +79,8 @@ export function ChatScreen({
   const askPeerFn = deps?.askPeer ?? askPeer;
   const fetchReplyFn = deps?.fetchReply ?? fetchReply;
   const localAskFn = deps?.localAsk ?? localAsk;
+  const cancelIncomingFn = deps?.cancelIncomingTicket ?? cancelIncomingTicket;
+  const answerIncomingFn = deps?.answerIncomingTicket ?? answerIncomingTicket;
   const localHome = deps?.home ?? home;
   const initialAskRef = useRef(initialAsk);
   const { exit } = useApp();
@@ -60,6 +88,7 @@ export function ChatScreen({
     const list = snap.peers.filter((p) => !p.self);
     return [...list].sort((a, b) => Number(b.online) - Number(a.online));
   }, [snap.peers]);
+  const incoming = snap.status?.incoming ?? [];
 
   const localLabel = useMemo(() => {
     const harness = snap.config?.responder?.harness ?? "cursor-agent";
@@ -69,7 +98,7 @@ export function ChatScreen({
   const welcomeItem: FeedItem = {
     id: "welcome",
     kind: "system",
-    text: "Type a question and Enter — pick a peer or local. /ask picker · /local · /dialogs threads (saved across tabs/restarts).",
+    text: "Type a question and Enter — pick a peer or local. /ask · /discuss · /incoming · /local · /dialogs (saved across tabs/restarts).",
   };
 
   const [feed, setFeed] = useState<FeedItem[]>([welcomeItem]);
@@ -77,10 +106,12 @@ export function ChatScreen({
   const [activeDialogId, setActiveDialogId] = useState<string | null>(null);
   const [filterDialogId, setFilterDialogId] = useState<string | null>(null);
   const [askPeerName, setAskPeerName] = useState<string | null>(null);
-  const [mode, setMode] = useState<"feed" | "pick_ask" | "pick_dialog" | "quit">("feed");
+  const [askMode, setAskMode] = useState<AskMode>("ask");
+  const [mode, setMode] = useState<ScreenMode>("feed");
   const [value, setValue] = useState("");
   const [pending, setPending] = useState(0);
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
+  const [incomingFocus, setIncomingFocus] = useState<IncomingTicket | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const dialogsRef = useRef(dialogs);
   const activeRef = useRef(activeDialogId);
@@ -218,18 +249,25 @@ export function ChatScreen({
     return { id, conversationId };
   };
 
-  const pollTicket = async (peer: string, dialogId: string, ticketId: string) => {
+  const pollTicket = async (
+    peer: string,
+    dialogId: string,
+    ticketId: string,
+    modeForTicket: AskMode = "ask",
+  ) => {
     if (!snap.config?.relay_url || !snap.config.token) return;
     setPending((n) => n + 1);
+    let lastPhase: string | undefined;
     try {
       for (let i = 0; i < REPLY_MAX; i += 1) {
         const reply = await fetchReplyFn(snap.config.relay_url, snap.config.token, ticketId, REPLY_WAIT);
         if (reply.status === "answered") {
+          const prefix = modeForTicket === "discuss" ? "FINAL · " : "";
           push({
             kind: "reply",
             peer,
             dialogId,
-            text: reply.answer ?? "",
+            text: `${prefix}${reply.answer ?? ""}`,
           });
           setDialogs((prev) => prev.map((d) => (d.id === dialogId ? { ...d, updatedAt: Date.now() } : d)));
           return;
@@ -241,6 +279,18 @@ export function ChatScreen({
         if (reply.status === "unknown_ticket") {
           push({ kind: "status", peer, dialogId, text: "unknown_ticket (expired or relay restart)" });
           return;
+        }
+        if (reply.status === "pending" && reply.phase && reply.phase !== lastPhase) {
+          lastPhase = reply.phase;
+          push({
+            kind: "status",
+            peer,
+            dialogId,
+            text:
+              modeForTicket === "discuss"
+                ? `discussing… · ${reply.phase === "working" ? "answering" : "queued"} · ${ticketId.slice(0, 8)}`
+                : phaseStatusLine(reply.phase, ticketId, false),
+          });
         }
       }
       push({ kind: "status", peer, dialogId, text: `timeout waiting for ${peer} (${ticketId.slice(0, 8)})` });
@@ -302,7 +352,8 @@ export function ChatScreen({
     }
   };
 
-  const sendAsk = async (peer: string, question: string) => {
+  const sendAsk = async (peer: string, question: string, modeOverride?: AskMode) => {
+    const modeForTicket = modeOverride ?? askMode;
     if (peer === LOCAL_PEER) {
       await sendLocalAsk(question);
       return;
@@ -317,7 +368,7 @@ export function ChatScreen({
       kind: "ask",
       peer,
       dialogId,
-      text: question,
+      text: modeForTicket === "discuss" ? `[discuss] ${question}` : question,
       pending: true,
     });
 
@@ -327,10 +378,12 @@ export function ChatScreen({
         question,
         conversation_id: conv ?? undefined,
         wait_seconds: 0,
+        mode: modeForTicket,
       });
       if (r.conversation_id) upsertDialog(peer, r.conversation_id);
       if (r.status === "answered") {
-        push({ kind: "reply", peer, dialogId, text: r.answer ?? "" });
+        const prefix = modeForTicket === "discuss" ? "FINAL · " : "";
+        push({ kind: "reply", peer, dialogId, text: `${prefix}${r.answer ?? ""}` });
         return;
       }
       if (r.status === "error") {
@@ -342,11 +395,11 @@ export function ChatScreen({
         peer,
         dialogId,
         text:
-          r.status === "peer_offline"
-            ? `queued offline · ticket ${r.ticket_id.slice(0, 8)}`
-            : `sent · waiting · ticket ${r.ticket_id.slice(0, 8)}`,
+          modeForTicket === "discuss"
+            ? `discussing… · ${r.phase === "working" ? "answering" : "queued"} · ${r.ticket_id.slice(0, 8)}`
+            : phaseStatusLine(r.phase, r.ticket_id, r.status === "peer_offline"),
       });
-      void pollTicket(peer, dialogId, r.ticket_id);
+      void pollTicket(peer, dialogId, r.ticket_id, modeForTicket);
     } catch (err) {
       push({
         kind: "status",
@@ -365,25 +418,37 @@ export function ChatScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once on mount for tests
   }, []);
 
-  const openAskPicker = (question?: string) => {
+  const openAskPicker = (question?: string, nextMode: AskMode = "ask") => {
+    setAskMode(nextMode);
     setPendingQuestion(question ?? null);
     setMode("pick_ask");
   };
 
-  const selectAskTarget = (name: string, question?: string | null) => {
+  const selectAskTarget = (name: string, question?: string | null, modeForTarget?: AskMode) => {
+    const modeNow = modeForTarget ?? askMode;
+    setAskMode(modeNow);
     setAskPeerName(name);
     upsertDialog(name, null);
     setPendingQuestion(null);
     setMode("feed");
     if (question) {
-      void sendAsk(name, question);
+      void sendAsk(name, question, modeNow);
     } else {
+      const label = modeNow === "discuss" ? "DISCUSS TARGET" : "ASK TARGET";
       push({
         kind: "system",
         peer: name,
-        text: `ASK TARGET → ${name === LOCAL_PEER ? localLabel : name}. Type the question and press Enter.`,
+        text: `${label} → ${name === LOCAL_PEER ? localLabel : name}. Type the question and press Enter.`,
       });
     }
+  };
+
+  const openIncoming = () => {
+    if (incoming.length === 0) {
+      push({ kind: "system", text: "No open incoming tickets." });
+      return;
+    }
+    setMode("pick_incoming");
   };
 
   const handleLine = (raw: string) => {
@@ -400,6 +465,7 @@ export function ChatScreen({
       setAskPeerName(null);
       setFilterDialogId(null);
       setPendingQuestion(null);
+      setAskMode("ask");
       primedRef.current = true; // do not auto-stick back to the only peer
       push({
         kind: "system",
@@ -408,22 +474,35 @@ export function ChatScreen({
       return;
     }
     if (line === "/local") {
+      setAskMode("ask");
       selectAskTarget(LOCAL_PEER);
       return;
     }
     if (line.startsWith("/local ")) {
+      setAskMode("ask");
       const question = line.slice("/local ".length).trim();
-      if (question) void sendAsk(LOCAL_PEER, question);
+      if (question) void sendAsk(LOCAL_PEER, question, "ask");
       else selectAskTarget(LOCAL_PEER);
       return;
     }
-    if (line === "/ask" || line === "/a") {
-      openAskPicker();
+    if (line === "/incoming" || line === "/in") {
+      openIncoming();
       return;
     }
-    if (line.startsWith("/ask ") || line.startsWith("/a ")) {
-      const rest = line.replace(/^\/(ask|a)\s+/, "").trim();
-      // Match peer by exact name, or unique prefix (so you don't type the full name).
+    if (line === "/ask" || line === "/a") {
+      openAskPicker(undefined, "ask");
+      return;
+    }
+    if (line === "/discuss" || line === "/di") {
+      openAskPicker(undefined, "discuss");
+      return;
+    }
+    const peerCmd = line.match(/^\/(ask|a|discuss|di)\s+(.+)$/);
+    if (peerCmd) {
+      const cmd = peerCmd[1]!;
+      const nextMode: AskMode = cmd === "discuss" || cmd === "di" ? "discuss" : "ask";
+      setAskMode(nextMode);
+      const rest = peerCmd[2]!.trim();
       const sp = rest.indexOf(" ");
       const namePart = (sp === -1 ? rest : rest.slice(0, sp)).trim();
       const question = sp === -1 ? "" : rest.slice(sp + 1).trim();
@@ -433,20 +512,24 @@ export function ChatScreen({
       if (matches.length === 1) {
         const name = matches[0]!.name;
         setAskPeerName(name);
-        if (question) void sendAsk(name, question);
+        if (question) void sendAsk(name, question, nextMode);
         else {
           upsertDialog(name, null);
-          push({ kind: "system", peer: name, text: `ASK TARGET → ${name}. Type the question.` });
+          push({
+            kind: "system",
+            peer: name,
+            text: `${nextMode === "discuss" ? "DISCUSS" : "ASK"} TARGET → ${name}. Type the question.`,
+          });
         }
         return;
       }
       if (matches.length === 0) {
         push({ kind: "system", text: `No peer matching "${namePart}". Opening picker…` });
-        openAskPicker(question || undefined);
+        openAskPicker(question || undefined, nextMode);
         return;
       }
       push({ kind: "system", text: `Ambiguous "${namePart}". Pick from the list.` });
-      openAskPicker(question || undefined);
+      openAskPicker(question || undefined, nextMode);
       return;
     }
     if (line === "/dialogs" || line === "/d" || line === "/threads") {
@@ -482,7 +565,7 @@ export function ChatScreen({
     if (line.startsWith("/")) {
       push({
         kind: "system",
-        text: "Commands: /ask · /local · /clear · /dialogs|/threads · /all · /new · /quit",
+        text: "Commands: /ask · /discuss · /incoming · /local · /clear · /dialogs · /all · /new · /quit",
       });
       return;
     }
@@ -504,16 +587,18 @@ export function ChatScreen({
     (input, key) => {
       if (mode !== "feed") return;
       if (key.escape && value === "") {
-        if (askPeerName || filterDialogId) {
+        if (askPeerName || filterDialogId || askMode === "discuss") {
           setAskPeerName(null);
           setFilterDialogId(null);
           setPendingQuestion(null);
+          setAskMode("ask");
           primedRef.current = true;
           push({ kind: "system", text: "Cleared ask target (Esc). /ask to choose again." });
         }
         return;
       }
-      if (key.ctrl && input === "a") openAskPicker();
+      if (key.ctrl && input === "a") openAskPicker(undefined, "ask");
+      if (key.ctrl && input === "i") openIncoming();
       if (key.ctrl && input === "d") {
         if (dialogs.length > 0) setMode("pick_dialog");
       }
@@ -544,14 +629,16 @@ export function ChatScreen({
   if (mode === "pick_ask") {
     return (
       <SelectModal
-        title="Who should answer?"
+        title={askMode === "discuss" ? "Discuss with whom?" : "Who should answer?"}
         description={
           pendingQuestion
             ? `Then send: “${pendingQuestion.slice(0, 60)}${pendingQuestion.length > 60 ? "…" : ""}”`
-            : "↑↓ choose · Enter. Local = this machine's harness (no relay)."
+            : askMode === "discuss"
+              ? "Multi-turn discuss mode. You see FINAL (+ compact discussing… lines)."
+              : "↑↓ choose · Enter. Local = this machine's harness (no relay)."
         }
         options={[
-          { value: LOCAL_PEER, label: `◆ ${localLabel}` },
+          ...(askMode === "ask" ? [{ value: LOCAL_PEER, label: `◆ ${localLabel}` }] : []),
           ...others.map((p) => ({
             value: p.name,
             label: `${p.online ? "●" : "○"} ${p.name}`,
@@ -559,9 +646,116 @@ export function ChatScreen({
         ]}
         onCancel={() => {
           setPendingQuestion(null);
+          setAskMode("ask");
           setMode("feed");
         }}
-        onSelect={(name) => selectAskTarget(name, pendingQuestion)}
+        onSelect={(name) => selectAskTarget(name, pendingQuestion, askMode)}
+      />
+    );
+  }
+
+  if (mode === "pick_incoming") {
+    return (
+      <SelectModal
+        title="Incoming tickets"
+        description="Open asks addressed to you. Enter for Reply as me / Cancel."
+        options={incoming.map((t) => ({
+          value: t.ticket_id,
+          label: `${t.from_peer} · ${t.phase} · ${t.mode} · ${t.question_preview.slice(0, 48)}`,
+        }))}
+        onCancel={() => setMode("feed")}
+        onSelect={(ticketId) => {
+          const t = incoming.find((x) => x.ticket_id === ticketId) ?? null;
+          setIncomingFocus(t);
+          setMode("incoming_action");
+        }}
+      />
+    );
+  }
+
+  if (mode === "incoming_action" && incomingFocus) {
+    const t = incomingFocus;
+    return (
+      <SelectModal
+        title={`${t.from_peer} · ${t.ticket_id.slice(0, 8)}`}
+        description={`${t.phase} · ${t.question_preview}`}
+        options={[
+          { value: "reply", label: "Reply as me" },
+          { value: "cancel", label: "Cancel ticket" },
+          { value: "back", label: "Back" },
+        ]}
+        onCancel={() => {
+          setIncomingFocus(null);
+          setMode("feed");
+        }}
+        onSelect={(action) => {
+          if (action === "reply") setMode("incoming_reply");
+          else if (action === "cancel") setMode("incoming_cancel");
+          else {
+            setIncomingFocus(null);
+            setMode("pick_incoming");
+          }
+        }}
+      />
+    );
+  }
+
+  if (mode === "incoming_reply" && incomingFocus) {
+    const t = incomingFocus;
+    return (
+      <TextPrompt
+        label={`Reply as you (to ${t.from_peer}, ticket ${t.ticket_id.slice(0, 8)})`}
+        placeholder="Your answer…"
+        validate={(v) => (v.trim() ? true : "Answer required")}
+        onCancel={() => setMode("incoming_action")}
+        onSubmit={(answer) => {
+          void (async () => {
+            if (!snap.config?.relay_url || !snap.config.token) return;
+            try {
+              await answerIncomingFn(snap.config.relay_url, snap.config.token, t.ticket_id, answer);
+              push({
+                kind: "system",
+                text: `Answered ${t.from_peer} as you · ${t.ticket_id.slice(0, 8)}`,
+              });
+            } catch (err) {
+              push({
+                kind: "system",
+                text: `Reply failed: ${err instanceof Error ? err.message : String(err)}`,
+              });
+            }
+            setIncomingFocus(null);
+            setMode("feed");
+          })();
+        }}
+      />
+    );
+  }
+
+  if (mode === "incoming_cancel" && incomingFocus) {
+    const t = incomingFocus;
+    return (
+      <ConfirmModal
+        title={`Cancel ticket from ${t.from_peer}? (${t.ticket_id.slice(0, 8)})`}
+        onCancel={() => setMode("incoming_action")}
+        onConfirm={() => {
+          void (async () => {
+            if (!snap.config?.relay_url || !snap.config.token) return;
+            try {
+              await cancelIncomingFn(snap.config.relay_url, snap.config.token, t.ticket_id);
+              push({
+                kind: "system",
+                text: `Cancelled incoming from ${t.from_peer} · ${t.ticket_id.slice(0, 8)}`,
+              });
+            } catch (err) {
+              push({
+                kind: "system",
+                text: `Cancel failed: ${err instanceof Error ? err.message : String(err)}`,
+              });
+            }
+            setIncomingFocus(null);
+            setMode("feed");
+          })();
+        }}
       />
     );
   }
@@ -628,7 +822,7 @@ export function ChatScreen({
           )}
           {target ? (
             <>
-              <Text color={theme.dim}> · next ask → </Text>
+              <Text color={theme.dim}> · next {askMode === "discuss" ? "discuss" : "ask"} → </Text>
               <Text color={theme.highlight} bold>
                 {targetLabel}
               </Text>
@@ -637,9 +831,15 @@ export function ChatScreen({
           ) : (
             <Text color={theme.dim}> · no ask target</Text>
           )}
+          {incoming.length > 0 ? (
+            <>
+              <Text color={theme.dim}> · </Text>
+              <Text color={theme.warn}>{incoming.length} incoming</Text>
+            </>
+          ) : null}
         </Text>
         <Text color={theme.dim}>
-          {dialogs.length} threads · Ctrl+D
+          {dialogs.length} threads · Ctrl+D · Ctrl+I
           {pending > 0 ? ` · ${pending} pending` : ""}
         </Text>
       </Box>
@@ -652,14 +852,16 @@ export function ChatScreen({
 
       <Box>
         <Text color={theme.accent} bold>
-          {target ? `/ask ${target}> ` : "> "}
+          {target ? `/${askMode === "discuss" ? "discuss" : "ask"} ${target}> ` : "> "}
         </Text>
         {inputActive ? (
           <TextInput
             value={value}
             placeholder={
               target
-                ? `Question for ${targetLabel}… (Enter sends)`
+                ? askMode === "discuss"
+                  ? `Discuss with ${targetLabel}… (Enter sends)`
+                  : `Question for ${targetLabel}… (Enter sends)`
                 : "Type a question · Enter · pick peer from list"
             }
             onChange={setValue}
@@ -671,7 +873,7 @@ export function ChatScreen({
       </Box>
       <Box marginTop={1}>
         <Text color={theme.dim}>
-          Enter send · Esc//clear leave ask · /ask · /local · /dialogs · /quit
+          Enter send · /ask · /discuss · /incoming · /local · /dialogs · /quit
           {pending > 0 ? ` · ${pending} in flight` : ""}
         </Text>
       </Box>
@@ -718,8 +920,9 @@ function FeedLine({ item }: { item: FeedItem }) {
     );
   }
   if (item.kind === "status") {
+    const answering = item.text.includes("answering") || item.text.includes("discussing");
     return (
-      <Text color={theme.warn}>
+      <Text color={answering ? theme.warn : theme.dim}>
         · {item.peer ? `${item.peer}: ` : ""}
         {item.text}
       </Text>

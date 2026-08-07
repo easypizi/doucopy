@@ -11,12 +11,45 @@ export interface QuestionContext {
   fromPeer: string;
   conversationId: string;
   hops: number;
+  mode?: "ask" | "discuss";
+  brief?: string;
 }
 
 export interface PromptOptions {
   persona?: string;
   restrictions?: ResolvedRestrictions;
   writeRoots?: string[];
+}
+
+const VERDICT_SECTION = [
+  "## Answer completeness (required trailer)",
+  "After your plain-text answer, append exactly this trailer (no other text after it):",
+  "---doucopy-meta---",
+  "answered: yes|no|partial",
+  "refused: yes|no",
+  "---end---",
+  "Use refused: yes only when the owner policy/restrictions blocked fulfilling the request.",
+  "Otherwise set refused: no and judge whether the original ask was actually fulfilled (answered).",
+].join("\n");
+
+function modeSection(ctx: QuestionContext): string[] {
+  if (ctx.mode !== "discuss") return [];
+  return [
+    "## Discuss mode",
+    "This is a collaborative discuss turn with the asker's agent (same human).",
+    "They may reformulate and send a brief. Answer helpfully; you may use one counter-question if needed.",
+    "Do not assume your reply is shown verbatim to the human; the asker may continue the discussion.",
+    "",
+  ];
+}
+
+function briefSection(ctx: QuestionContext): string[] {
+  if (!ctx.brief?.trim()) return [];
+  return [
+    "## Brief from the asking agent (instructions, not the user question)",
+    ctx.brief.trim(),
+    "",
+  ];
 }
 
 function describeRestrictions(restrictions: ResolvedRestrictions | undefined, writeRoots: string[] | undefined): string[] {
@@ -133,15 +166,19 @@ export function buildFirstTask(
     "",
     HARNESS_MEMORY_HINT,
     "",
+    ...modeSection(ctx),
+    ...briefSection(ctx),
     ...counterQuestionSection(ctx),
     "## Rules",
     "- Search the sources for facts relevant to the question. Do not invent facts.",
     "- If no source (curated or built-in) contains relevant information, say so honestly.",
     "- Every fact you state must trace back to a source you actually consulted.",
-    "- Reply with the final answer as plain text, no preamble.",
+    "- Reply with the final answer as plain text, no preamble (except the required meta trailer).",
     "",
     "## Question",
     question,
+    "",
+    VERDICT_SECTION,
   );
   return lines.join("\n");
 }
@@ -165,10 +202,14 @@ export function buildFollowupTask(
     "Never paste secrets or MCP env values into your answer.",
     "If the `doucopy-answer` skill is available, follow it for the search method.",
     "",
+    ...modeSection(ctx),
+    ...briefSection(ctx),
     ...counterQuestionSection(ctx),
-    "Reply with the final answer as plain text, no preamble.",
+    "Reply with the final answer as plain text, no preamble (except the required meta trailer).",
     "",
     "## Question",
     question,
+    "",
+    VERDICT_SECTION,
   ].join("\n");
 }

@@ -22,9 +22,20 @@ There is exactly one exception. If, and only if, you need a clarifying fact from
 
 1. **Pick a peer.** Call `list_peers`. Only online peers can answer immediately; offline ones will get the question when they come back but you won't get a synchronous reply.
 2. **Write a self-contained question.** The responder does not share your chat context, files, or open editor. Include the timeframe, product, and any names it needs. No pronouns without antecedents.
-3. **Call `ask_peer`.** Save both `ticket_id` and `conversation_id`.
+3. **Call `ask_peer`.** Save both `ticket_id` and `conversation_id`. Optional: `mode: "discuss"` and `brief` (short instructions for the responder agent).
 4. **Wait until settled** using the protocol below. Do not hand a bare `pending` back to the user as if the task were done.
 5. **Follow up in the same thread** by passing the same `conversation_id` on the next `ask_peer` call. The responder resumes the same agent chat, so it remembers the prior turn without you restating context.
+
+## Discuss mode (`mode: "discuss"`)
+
+Use when you need several collaborative turns with the peer agent before answering the human.
+
+1. Stay on one `conversation_id`. Cap: 4 open tickets per conversation (same as ask).
+2. Pass a short `brief` when the peer needs process instructions (what to check, tone, constraints). Do not dump your full chat.
+3. You may reformulate and continue until you can produce a **FINAL** answer for the human.
+4. Do not dump intermediate agent chatter as the user-visible reply. Compact status lines are fine ("discussing…"). Only the FINAL goes to the user.
+5. Responder may still use one counter-question per ticket (`hops: 1`) when needed.
+6. Default `mode` is `ask` (one-shot). Only use discuss when multi-turn collaboration helps.
 
 ## Waiting for the answer (mandatory)
 

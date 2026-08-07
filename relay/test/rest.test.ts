@@ -362,13 +362,77 @@ describe("GET /status", () => {
       url: "/status",
       headers: { authorization: `Bearer ${ctx.workToken}` },
     });
-    expect(whileWorking.json()).toMatchObject({ incoming_queued: 1 });
+    expect(whileWorking.json()).toMatchObject({
+      incoming_queued: 1,
+      incoming: [{ ticket_id, from_peer: "personal", phase: "working" }],
+    });
     ctx.mailbox.settle(ticket_id, { answer: "ok" }, "work");
     const after = await ctx.app.inject({
       method: "GET",
       url: "/status",
       headers: { authorization: `Bearer ${ctx.workToken}` },
     });
-    expect(after.json()).toMatchObject({ incoming_queued: 0 });
+    expect(after.json()).toMatchObject({ incoming_queued: 0, incoming: [] });
+  });
+});
+
+describe("POST /ticket/:id cancel and answer", () => {
+  it("lets the assignee cancel or answer manually", async () => {
+    const ctx = makeApp();
+    const { ticket_id } = ctx.mailbox.enqueue("work", "personal", "hi");
+    const forbidden = await ctx.app.inject({
+      method: "POST",
+      url: `/ticket/${ticket_id}/cancel`,
+      headers: { authorization: `Bearer ${ctx.personalToken}` },
+    });
+    expect(forbidden.statusCode).toBe(404);
+
+    const answered = await ctx.app.inject({
+      method: "POST",
+      url: `/ticket/${ticket_id}/answer`,
+      headers: { authorization: `Bearer ${ctx.workToken}` },
+      payload: { answer: "I got this" },
+    });
+    expect(answered.statusCode).toBe(200);
+    expect(ctx.mailbox.checkReply(ticket_id)).toMatchObject({
+      status: "answered",
+      answer: "I got this",
+    });
+
+    const other = ctx.mailbox.enqueue("work", "personal", "next");
+    const cancelled = await ctx.app.inject({
+      method: "POST",
+      url: `/ticket/${other.ticket_id}/cancel`,
+      headers: { authorization: `Bearer ${ctx.workToken}` },
+    });
+    expect(cancelled.statusCode).toBe(200);
+    expect(ctx.mailbox.checkReply(other.ticket_id)).toEqual({
+      status: "error",
+      error: "cancelled by owner",
+    });
+  });
+});
+
+describe("POST /ask discuss mode", () => {
+  it("accepts mode=discuss and brief", async () => {
+    const ctx = makeApp();
+    await ctx.mailbox.takeNext("work", 0);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/ask",
+      headers: { authorization: `Bearer ${ctx.personalToken}` },
+      payload: {
+        peer: "work",
+        question: "collaborate?",
+        wait_seconds: 0,
+        mode: "discuss",
+        brief: "keep it short",
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { ticket_id: string; status: string };
+    expect(body.status).toBe("pending");
+    const q = await ctx.mailbox.takeNext("work", 0);
+    expect(q).toMatchObject({ mode: "discuss", brief: "keep it short", question: "collaborate?" });
   });
 });

@@ -1,7 +1,12 @@
 import type { DaemonConfig } from "./config.js";
 import type { Question } from "./types.js";
 
-export type QuestionHandler = (q: Question) => Promise<{ answer?: string; error?: string }>;
+export type QuestionHandler = (q: Question) => Promise<{
+  answer?: string;
+  error?: string;
+  answered?: string;
+  refused?: string;
+}>;
 
 const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 60_000;
@@ -91,7 +96,7 @@ export class Poller {
       authorization: `Bearer ${this.config.token}`,
       "content-type": "application/json",
     };
-    let result: { answer?: string; error?: string };
+    let result: { answer?: string; error?: string; answered?: string; refused?: string };
     try {
       result = await this.handle(question);
     } catch (err) {

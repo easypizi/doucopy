@@ -8,12 +8,36 @@ export interface InviteResult {
   expires_at: number;
 }
 
+export type TicketPhase = "queued" | "working";
+export type AskMode = "ask" | "discuss";
+
+export interface IncomingTicket {
+  ticket_id: string;
+  from_peer: string;
+  conversation_id: string;
+  created_at: number;
+  phase: TicketPhase;
+  mode: AskMode;
+  question_preview: string;
+}
+
+export interface OutgoingTicket {
+  ticket_id: string;
+  to_peer: string;
+  status: string;
+  phase?: TicketPhase;
+  created_at: number;
+  mode?: AskMode;
+  question_preview?: string;
+}
+
 export interface RelayStatus {
   self: string;
   self_online: boolean;
   peers: Array<{ name: string; online: boolean }>;
   incoming_queued: number;
-  outgoing: Array<{ ticket_id: string; to_peer: string; status: string; created_at: number }>;
+  incoming?: IncomingTicket[];
+  outgoing: OutgoingTicket[];
 }
 
 export function normalizeRelayUrl(url: string): string {
@@ -73,6 +97,9 @@ export interface AskResult {
   conversation_id: string;
   answer?: string;
   error?: string;
+  answered?: string;
+  refused?: string;
+  phase?: TicketPhase;
 }
 
 export interface ReplyResult {
@@ -80,12 +107,23 @@ export interface ReplyResult {
   ticket_id: string;
   answer?: string;
   error?: string;
+  answered?: string;
+  refused?: string;
+  phase?: TicketPhase;
 }
 
 export async function askPeer(
   relayUrl: string,
   token: string,
-  input: { peer: string; question: string; wait_seconds?: number; conversation_id?: string; hops?: number },
+  input: {
+    peer: string;
+    question: string;
+    wait_seconds?: number;
+    conversation_id?: string;
+    hops?: number;
+    mode?: AskMode;
+    brief?: string;
+  },
   fetchImpl: typeof fetch = fetch,
 ): Promise<AskResult> {
   return requestJson<AskResult>(fetchImpl, `${normalizeRelayUrl(relayUrl)}/ask`, {
@@ -118,4 +156,39 @@ export async function fetchStatus(
     method: "GET",
     headers: { authorization: `Bearer ${token}` },
   });
+}
+
+export async function cancelIncomingTicket(
+  relayUrl: string,
+  token: string,
+  ticketId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  await requestJson<{ ok: boolean }>(
+    fetchImpl,
+    `${normalizeRelayUrl(relayUrl)}/ticket/${encodeURIComponent(ticketId)}/cancel`,
+    {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: "{}",
+    },
+  );
+}
+
+export async function answerIncomingTicket(
+  relayUrl: string,
+  token: string,
+  ticketId: string,
+  answer: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  await requestJson<{ ok: boolean }>(
+    fetchImpl,
+    `${normalizeRelayUrl(relayUrl)}/ticket/${encodeURIComponent(ticketId)}/answer`,
+    {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ answer }),
+    },
+  );
 }

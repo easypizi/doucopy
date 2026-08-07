@@ -115,6 +115,22 @@ export function StatusScreen({
             {snap.status?.incoming_queued ?? 0}
           </Text>
         </Text>
+        {(snap.status?.incoming?.length ?? 0) > 0 ? (
+          <Box marginTop={1} flexDirection="column">
+            <Text color={theme.dim}>incoming</Text>
+            {snap.status!.incoming!.map((t) => (
+              <Box key={t.ticket_id}>
+                <Text color={theme.dim}>  ← </Text>
+                <Text>{t.from_peer.padEnd(14)} </Text>
+                <Text color={t.phase === "working" ? theme.warn : theme.dim}>{t.phase}</Text>
+                <Text color={theme.dim}>
+                  {" "}
+                  {t.mode} · {t.question_preview.slice(0, 36)}
+                </Text>
+              </Box>
+            ))}
+          </Box>
+        ) : null}
         <Box marginTop={1} flexDirection="column">
           <Text color={theme.dim}>open dialogs</Text>
           {!snap.status || snap.status.outgoing.length === 0 ? (
@@ -124,7 +140,13 @@ export function StatusScreen({
               <Box key={t.ticket_id}>
                 <Text color={theme.dim}>  → </Text>
                 <Text>{t.to_peer.padEnd(16)} </Text>
-                <Text color={statusColor(t.status)}>{t.status}</Text>
+                <Text color={statusColor(t.status)}>
+                  {t.status === "pending" && t.phase === "working"
+                    ? "answering"
+                    : t.status === "pending" && t.phase === "queued"
+                      ? "queued"
+                      : t.status}
+                </Text>
                 <Text color={theme.dim}>  {t.ticket_id.slice(0, 8)}</Text>
               </Box>
             ))

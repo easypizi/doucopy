@@ -36,14 +36,42 @@ export function registerRest(app: FastifyInstance, mailbox: Mailbox, tokens: Tok
     },
   );
 
-  app.post<{ Body: { ticket_id?: string; answer?: string; error?: string } }>(
-    "/answer",
+  app.post<{
+    Body: {
+      ticket_id?: string;
+      answer?: string;
+      error?: string;
+      answered?: string;
+      refused?: string;
+    };
+  }>("/answer", async (req, reply) => {
+    const peer = authPeer(req, tokens);
+    if (!peer) return reply.code(401).send({ error: "unauthorized" });
+    const { ticket_id, answer, error, answered, refused } = req.body ?? {};
+    if (!ticket_id) return reply.code(400).send({ error: "ticket_id required" });
+    const ok = mailbox.settle(ticket_id, { answer, error, answered, refused }, peer);
+    if (!ok) return reply.code(404).send({ error: "unknown_ticket" });
+    return { ok: true };
+  });
+
+  app.post<{ Params: { ticket_id: string } }>("/ticket/:ticket_id/cancel", async (req, reply) => {
+    const peer = authPeer(req, tokens);
+    if (!peer) return reply.code(401).send({ error: "unauthorized" });
+    const ok = mailbox.cancelByOwner(req.params.ticket_id, peer);
+    if (!ok) return reply.code(404).send({ error: "unknown_ticket" });
+    return { ok: true };
+  });
+
+  app.post<{ Params: { ticket_id: string }; Body: { answer?: string } }>(
+    "/ticket/:ticket_id/answer",
     async (req, reply) => {
       const peer = authPeer(req, tokens);
       if (!peer) return reply.code(401).send({ error: "unauthorized" });
-      const { ticket_id, answer, error } = req.body ?? {};
-      if (!ticket_id) return reply.code(400).send({ error: "ticket_id required" });
-      const ok = mailbox.settle(ticket_id, { answer, error }, peer);
+      const answer = req.body?.answer;
+      if (!answer || typeof answer !== "string" || !answer.trim()) {
+        return reply.code(400).send({ error: "answer required" });
+      }
+      const ok = mailbox.answerByOwner(req.params.ticket_id, peer, answer);
       if (!ok) return reply.code(404).send({ error: "unknown_ticket" });
       return { ok: true };
     },
@@ -99,27 +127,31 @@ export function registerRest(app: FastifyInstance, mailbox: Mailbox, tokens: Tok
       wait_seconds?: number;
       conversation_id?: string;
       hops?: number;
+      mode?: string;
+      brief?: string;
     };
   }>("/ask", async (req, reply) => {
     const fromPeer = authPeer(req, tokens);
     if (!fromPeer) return reply.code(401).send({ error: "unauthorized" });
-    const { peer, question, wait_seconds, conversation_id, hops } = req.body ?? {};
+    const { peer, question, wait_seconds, conversation_id, hops, mode, brief } = req.body ?? {};
     if (!peer || typeof peer !== "string") return reply.code(400).send({ error: "peer required" });
     if (!question || typeof question !== "string") return reply.code(400).send({ error: "question required" });
     if (peer === fromPeer) return reply.code(400).send({ error: "cannot ask yourself" });
     if (hops !== undefined && (!Number.isInteger(hops) || hops < 0 || hops > MAX_HOPS)) {
       return reply.code(400).send({ error: `hops must be an integer between 0 and ${MAX_HOPS}` });
     }
+    if (mode !== undefined && mode !== "ask" && mode !== "discuss") {
+      return reply.code(400).send({ error: "mode must be ask or discuss" });
+    }
     let ticket_id: string;
     let convId: string;
     try {
-      ({ ticket_id, conversation_id: convId } = mailbox.enqueue(
-        peer,
-        fromPeer,
-        question,
-        conversation_id,
-        hops ?? 0,
-      ));
+      ({ ticket_id, conversation_id: convId } = mailbox.enqueue(peer, fromPeer, question, {
+        conversationId: conversation_id,
+        clientHops: hops ?? 0,
+        mode: mode === "discuss" ? "discuss" : "ask",
+        brief: typeof brief === "string" ? brief : undefined,
+      }));
     } catch (err) {
       if (err instanceof HopLimitError || err instanceof ConversationFullError) {
         return reply.code(400).send({ status: "error", error: err.message });
@@ -166,6 +198,7 @@ export function registerRest(app: FastifyInstance, mailbox: Mailbox, tokens: Tok
       // Open incoming = queued in inbox OR already delivered to the daemon but
       // not yet answered. Inbox depth alone stays 0 for almost the whole ask
       // (long-poll takes the ticket immediately).
+      incoming: mailbox.incomingFor(peer),
       incoming_queued: mailbox.openIncomingCount(peer),
       outgoing: mailbox.outgoingFor(peer),
     };

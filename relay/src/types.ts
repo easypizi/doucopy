@@ -1,3 +1,5 @@
+export type AskMode = "ask" | "discuss";
+
 export interface Question {
   ticket_id: string;
   from_peer: string;
@@ -6,4 +8,6 @@ export interface Question {
   hops: number;
   created_at: number;
   deadline: number;
+  mode?: AskMode;
+  brief?: string;
 }

@@ -61,7 +61,7 @@ describe("Mailbox", () => {
     const { ticket_id } = box.enqueue("work", "personal", "hi");
     const waiting = box.waitForAnswer(ticket_id, 1000);
     vi.advanceTimersByTime(1001);
-    await expect(waiting).resolves.toEqual({ status: "pending" });
+    await expect(waiting).resolves.toEqual({ status: "pending", phase: "queued" });
     box.settle(ticket_id, { answer: "late" });
     expect(box.checkReply(ticket_id)).toEqual({ status: "answered", answer: "late" });
     expect(box.checkReply(ticket_id)).toEqual({ status: "unknown_ticket" });
@@ -114,6 +114,7 @@ describe("Mailbox", () => {
     controller.abort();
     await expect(box.waitForAnswer(ticket_id, 10_000, controller.signal)).resolves.toEqual({
       status: "pending",
+      phase: "queued",
     });
     expect(box.settle(ticket_id, { answer: "42" })).toBe(true);
     expect(box.checkReply(ticket_id)).toEqual({ status: "answered", answer: "42" });
@@ -125,7 +126,7 @@ describe("Mailbox", () => {
     const controller = new AbortController();
     const waiting = box.waitForAnswer(ticket_id, 10_000, controller.signal);
     controller.abort();
-    await expect(waiting).resolves.toEqual({ status: "pending" });
+    await expect(waiting).resolves.toEqual({ status: "pending", phase: "queued" });
     expect(box.settle(ticket_id, { answer: "later" })).toBe(true);
     expect(box.checkReply(ticket_id)).toEqual({ status: "answered", answer: "later" });
   });
@@ -137,7 +138,7 @@ describe("Mailbox", () => {
     const aborting = box.waitForAnswer(ticket_id, 10_000, controller.signal);
     const surviving = box.waitForAnswer(ticket_id, 10_000);
     controller.abort();
-    await expect(aborting).resolves.toEqual({ status: "pending" });
+    await expect(aborting).resolves.toEqual({ status: "pending", phase: "queued" });
     expect(box.settle(ticket_id, { answer: "42" })).toBe(true);
     await expect(surviving).resolves.toEqual({ status: "answered", answer: "42" });
     expect(box.checkReply(ticket_id)).toEqual({ status: "unknown_ticket" });
@@ -252,6 +253,59 @@ describe("Mailbox", () => {
       [b.ticket_id, "work", "answered"],
       [c.ticket_id, "work", "error"],
     ]);
+    expect(out[0]?.phase).toBe("queued");
     expect(box.outgoingFor("work")).toEqual([]);
+  });
+
+  it("marks phase working when takeNext delivers a ticket", async () => {
+    const box = new Mailbox();
+    const { ticket_id } = box.enqueue("work", "personal", "long question about coffee");
+    expect(box.outgoingFor("personal")[0]?.phase).toBe("queued");
+    expect(box.incomingFor("work")[0]).toMatchObject({
+      ticket_id,
+      from_peer: "personal",
+      phase: "queued",
+      mode: "ask",
+    });
+    await box.takeNext("work", 0);
+    expect(box.outgoingFor("personal")[0]?.phase).toBe("working");
+    expect(box.incomingFor("work")[0]?.phase).toBe("working");
+    expect(box.checkReply(ticket_id)).toEqual({ status: "pending", phase: "working" });
+  });
+
+  it("stores discuss mode and brief on enqueue", async () => {
+    const box = new Mailbox();
+    const { ticket_id } = box.enqueue("work", "personal", "help?", {
+      mode: "discuss",
+      brief: "check transcripts first",
+    });
+    const q = await box.takeNext("work", 0);
+    expect(q).toMatchObject({
+      ticket_id,
+      mode: "discuss",
+      brief: "check transcripts first",
+    });
+    expect(box.incomingFor("work")[0]?.mode).toBe("discuss");
+  });
+
+  it("cancelByOwner and answerByOwner settle only for the assignee", () => {
+    const box = new Mailbox();
+    const { ticket_id } = box.enqueue("work", "personal", "hi");
+    expect(box.cancelByOwner(ticket_id, "personal")).toBe(false);
+    expect(box.answerByOwner(ticket_id, "personal", "nope")).toBe(false);
+    expect(box.answerByOwner(ticket_id, "work", "  ")).toBe(false);
+    expect(box.answerByOwner(ticket_id, "work", "owner says yes")).toBe(true);
+    expect(box.checkReply(ticket_id)).toEqual({
+      status: "answered",
+      answer: "owner says yes",
+      answered: "yes",
+      refused: "no",
+    });
+    const again = box.enqueue("work", "personal", "bye");
+    expect(box.cancelByOwner(again.ticket_id, "work")).toBe(true);
+    expect(box.checkReply(again.ticket_id)).toEqual({
+      status: "error",
+      error: "cancelled by owner",
+    });
   });
 });

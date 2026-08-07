@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { askPeer, fetchReply, fetchStatus, joinRelay, normalizeRelayUrl, requestInvite } from "../src/api.js";
+import {
+  answerIncomingTicket,
+  askPeer,
+  cancelIncomingTicket,
+  fetchReply,
+  fetchStatus,
+  joinRelay,
+  normalizeRelayUrl,
+  requestInvite,
+} from "../src/api.js";
 
 function fakeFetch(status: number, body: unknown) {
   return vi.fn(async () =>
@@ -67,11 +76,37 @@ describe("askPeer", () => {
     });
   });
 
+  it("includes mode and brief when provided", async () => {
+    const fetchImpl = fakeFetch(200, { status: "pending", ticket_id: "t1", conversation_id: "c1" });
+    await askPeer(
+      "https://r.example.com",
+      "tok",
+      { peer: "work", question: "q?", mode: "discuss", brief: "be brief" },
+      fetchImpl,
+    );
+    const [, init] = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({ mode: "discuss", brief: "be brief" });
+  });
+
   it("surfaces relay error strings", async () => {
     const fetchImpl = fakeFetch(400, { error: "cannot ask yourself" });
     await expect(
       askPeer("https://r.example.com", "tok", { peer: "self", question: "?" }, fetchImpl),
     ).rejects.toThrow(/cannot ask yourself/);
+  });
+});
+
+describe("incoming ticket intervention", () => {
+  it("POSTs cancel and answer endpoints", async () => {
+    const fetchImpl = fakeFetch(200, { ok: true });
+    await cancelIncomingTicket("https://r.example.com", "tok", "t1", fetchImpl);
+    expect((fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toBe(
+      "https://r.example.com/ticket/t1/cancel",
+    );
+    await answerIncomingTicket("https://r.example.com", "tok", "t2", "hi", fetchImpl);
+    const [url, init] = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[1] as [string, RequestInit];
+    expect(url).toBe("https://r.example.com/ticket/t2/answer");
+    expect(JSON.parse(String(init.body))).toEqual({ answer: "hi" });
   });
 });
 

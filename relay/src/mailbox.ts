@@ -1,5 +1,5 @@
 import { v7 as uuidv7 } from "uuid";
-import type { Question } from "./types.js";
+import type { AskMode, Question } from "./types.js";
 
 const QUESTION_TTL_MS = 24 * 60 * 60 * 1000;
 const RETENTION_MS = QUESTION_TTL_MS;
@@ -9,11 +9,14 @@ const ONLINE_WINDOW_MS = 60_000;
 export const PEER_RETENTION_MS = 5 * 60_000;
 export const MAX_HOPS = 1;
 export const MAX_OPEN_PER_CONVERSATION = 4;
+export const PREVIEW_CHARS = 120;
+
+export type TicketPhase = "queued" | "working";
 
 export type ReplyStatus =
-  | { status: "answered"; answer: string }
+  | { status: "answered"; answer: string; answered?: string; refused?: string }
   | { status: "error"; error: string }
-  | { status: "pending" }
+  | { status: "pending"; phase?: TicketPhase }
   | { status: "unknown_ticket" };
 
 interface PendingEntry {
@@ -23,8 +26,14 @@ interface PendingEntry {
   hops: number;
   created_at: number;
   deadline: number;
+  question: string;
+  brief?: string;
+  mode: AskMode;
+  phase: TicketPhase;
   answer?: string;
   error?: string;
+  answered?: string;
+  refused?: string;
   settled: boolean;
   settleListeners: Set<() => void>;
 }
@@ -45,12 +54,38 @@ export interface OutgoingTicket {
   ticket_id: string;
   to_peer: string;
   status: "pending" | "answered" | "error";
+  phase?: TicketPhase;
   created_at: number;
+  mode: AskMode;
+  question_preview: string;
+}
+
+export interface IncomingTicket {
+  ticket_id: string;
+  from_peer: string;
+  conversation_id: string;
+  created_at: number;
+  phase: TicketPhase;
+  mode: AskMode;
+  question_preview: string;
+}
+
+export interface EnqueueOptions {
+  conversationId?: string;
+  clientHops?: number;
+  mode?: AskMode;
+  brief?: string;
 }
 
 interface Waiter {
   resolve: (q: Question | null) => void;
   timer: NodeJS.Timeout;
+}
+
+function previewOf(text: string): string {
+  const one = text.replace(/\s+/g, " ").trim();
+  if (one.length <= PREVIEW_CHARS) return one;
+  return `${one.slice(0, PREVIEW_CHARS - 1)}…`;
 }
 
 export class Mailbox {
@@ -64,19 +99,22 @@ export class Mailbox {
     toPeer: string,
     fromPeer: string,
     question: string,
-    conversationId?: string,
-    clientHops = 0,
+    conversationIdOrOpts?: string | EnqueueOptions,
+    clientHopsArg = 0,
   ): { ticket_id: string; conversation_id: string } {
     this.cleanup();
+    const opts: EnqueueOptions =
+      typeof conversationIdOrOpts === "string" || conversationIdOrOpts === undefined
+        ? { conversationId: conversationIdOrOpts, clientHops: clientHopsArg }
+        : conversationIdOrOpts;
+    const conversationId = opts.conversationId;
+    const clientHops = opts.clientHops ?? 0;
+    const mode: AskMode = opts.mode === "discuss" ? "discuss" : "ask";
+    const brief = typeof opts.brief === "string" && opts.brief.trim() ? opts.brief.trim().slice(0, 2000) : undefined;
+
     const now = Date.now();
     const ticket_id = uuidv7();
     const conversation_id = conversationId ?? uuidv7();
-    // Derive hops from server state so a malicious client cannot bypass the
-    // depth limit by simply omitting the parameter. If fromPeer currently owes
-    // an unsettled answer in this conversation (entry.peer === fromPeer), the
-    // new question is a counter-question and its hops must be at least
-    // max(open inbound hops) + 1. Take max(client, derived) so honest clients
-    // that already increment the counter still behave correctly.
     let derivedHops = 0;
     if (conversationId !== undefined) {
       let open = 0;
@@ -102,21 +140,29 @@ export class Mailbox {
       hops,
       created_at: now,
       deadline: now + QUESTION_TTL_MS,
+      mode,
+      brief,
     };
-    this.pending.set(ticket_id, {
+    const entry: PendingEntry = {
       peer: toPeer,
       from: fromPeer,
       conversation_id,
       hops,
       created_at: now,
       deadline: item.deadline,
+      question,
+      brief,
+      mode,
+      phase: "queued",
       settled: false,
       settleListeners: new Set(),
-    });
+    };
+    this.pending.set(ticket_id, entry);
 
     const waiter = this.waiters.get(toPeer)?.shift();
     if (waiter) {
       clearTimeout(waiter.timer);
+      entry.phase = "working";
       waiter.resolve(item);
     } else {
       const queue = this.inbox.get(toPeer) ?? [];
@@ -134,10 +180,16 @@ export class Mailbox {
     this.lastSeen.set(peer, Date.now());
     this.cleanup();
     const next = this.inbox.get(peer)?.shift();
-    if (next) return Promise.resolve(next);
+    if (next) {
+      this.markWorking(next.ticket_id);
+      return Promise.resolve(next);
+    }
     return new Promise((resolve) => {
       const waiter: Waiter = {
-        resolve,
+        resolve: (q) => {
+          if (q) this.markWorking(q.ticket_id);
+          resolve(q);
+        },
         timer: setTimeout(() => {
           const list = this.waiters.get(peer) ?? [];
           const index = list.indexOf(waiter);
@@ -151,13 +203,24 @@ export class Mailbox {
     });
   }
 
-  settle(ticketId: string, result: { answer?: string; error?: string }, answeredBy?: string): boolean {
+  private markWorking(ticketId: string): void {
+    const entry = this.pending.get(ticketId);
+    if (entry && !entry.settled) entry.phase = "working";
+  }
+
+  settle(
+    ticketId: string,
+    result: { answer?: string; error?: string; answered?: string; refused?: string },
+    answeredBy?: string,
+  ): boolean {
     this.cleanup();
     const entry = this.pending.get(ticketId);
     if (!entry || entry.settled) return false;
     if (answeredBy !== undefined && answeredBy !== entry.peer) return false;
     entry.answer = result.answer;
     entry.error = result.error;
+    entry.answered = result.answered;
+    entry.refused = result.refused;
     if (entry.answer === undefined && entry.error === undefined) entry.error = "empty answer";
     entry.settled = true;
     entry.deadline = Date.now() + RETENTION_MS;
@@ -165,12 +228,24 @@ export class Mailbox {
     return true;
   }
 
+  /** Assignee (responder peer) cancels an open ticket. */
+  cancelByOwner(ticketId: string, ownerPeer: string): boolean {
+    return this.settle(ticketId, { error: "cancelled by owner" }, ownerPeer);
+  }
+
+  /** Assignee answers manually instead of the agent. */
+  answerByOwner(ticketId: string, ownerPeer: string, answer: string): boolean {
+    const text = answer.trim();
+    if (!text) return false;
+    return this.settle(ticketId, { answer: text, answered: "yes", refused: "no" }, ownerPeer);
+  }
+
   waitForAnswer(ticketId: string, timeoutMs: number, signal?: AbortSignal): Promise<ReplyStatus> {
     this.cleanup();
     const entry = this.pending.get(ticketId);
     if (!entry) return Promise.resolve({ status: "unknown_ticket" });
     if (entry.settled) return Promise.resolve(this.consume(ticketId, entry));
-    if (signal?.aborted) return Promise.resolve({ status: "pending" });
+    if (signal?.aborted) return Promise.resolve({ status: "pending", phase: entry.phase });
     return new Promise((resolve) => {
       const cleanup = () => {
         clearTimeout(timer);
@@ -183,13 +258,11 @@ export class Mailbox {
       };
       const timer = setTimeout(() => {
         cleanup();
-        resolve({ status: "pending" });
+        resolve({ status: "pending", phase: entry.phase });
       }, timeoutMs);
-      // The asker's connection died; leave the entry settled (if it later is) so
-      // check_reply can still retrieve the answer instead of losing it silently.
       const onAbort = () => {
         cleanup();
-        resolve({ status: "pending" });
+        resolve({ status: "pending", phase: entry.phase });
       };
       entry.settleListeners.add(listener);
       signal?.addEventListener("abort", onAbort, { once: true });
@@ -200,7 +273,7 @@ export class Mailbox {
     this.cleanup();
     const entry = this.pending.get(ticketId);
     if (!entry) return { status: "unknown_ticket" };
-    if (!entry.settled) return { status: "pending" };
+    if (!entry.settled) return { status: "pending", phase: entry.phase };
     return this.consume(ticketId, entry);
   }
 
@@ -227,22 +300,52 @@ export class Mailbox {
     return n;
   }
 
+  incomingFor(peer: string): IncomingTicket[] {
+    this.cleanup();
+    const result: IncomingTicket[] = [];
+    for (const [ticket_id, entry] of this.pending) {
+      if (entry.peer !== peer || entry.settled) continue;
+      result.push({
+        ticket_id,
+        from_peer: entry.from,
+        conversation_id: entry.conversation_id,
+        created_at: entry.created_at,
+        phase: entry.phase,
+        mode: entry.mode,
+        question_preview: previewOf(entry.question),
+      });
+    }
+    return result.sort((a, b) => a.created_at - b.created_at);
+  }
+
   outgoingFor(peer: string): OutgoingTicket[] {
     this.cleanup();
     const result: OutgoingTicket[] = [];
     for (const [ticket_id, entry] of this.pending) {
       if (entry.from !== peer) continue;
       const status = !entry.settled ? "pending" : entry.error !== undefined ? "error" : "answered";
-      result.push({ ticket_id, to_peer: entry.peer, status, created_at: entry.created_at });
+      result.push({
+        ticket_id,
+        to_peer: entry.peer,
+        status,
+        phase: entry.settled ? undefined : entry.phase,
+        created_at: entry.created_at,
+        mode: entry.mode,
+        question_preview: previewOf(entry.question),
+      });
     }
     return result.sort((a, b) => a.created_at - b.created_at);
   }
 
-  // Answers are single-read: consuming removes the entry to bound memory.
   private consume(ticketId: string, entry: PendingEntry): ReplyStatus {
     this.pending.delete(ticketId);
     if (entry.error !== undefined) return { status: "error", error: entry.error };
-    return { status: "answered", answer: entry.answer ?? "" };
+    return {
+      status: "answered",
+      answer: entry.answer ?? "",
+      answered: entry.answered,
+      refused: entry.refused,
+    };
   }
 
   private pruneLastSeen(now = Date.now()): void {

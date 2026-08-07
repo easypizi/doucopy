@@ -14,6 +14,7 @@ import {
 } from "./permissions.js";
 import type { QuestionHandler } from "./poller.js";
 import { readPolicy } from "./policy.js";
+import { parseAnswerMeta } from "./answer-meta.js";
 import { buildFirstTask, buildFollowupTask, type MemoryMap } from "./prompt.js";
 import { applyRedactions, compileRedactRules } from "./redact.js";
 import { safeDirName } from "./workspace.js";
@@ -66,15 +67,21 @@ export function createHandler(
   // users) and the legacy `redact` field in config.json (still honoured for
   // back-compat). Re-parsed per question so edits to policy.md take effect
   // without a daemon restart.
-  const redactResult = (parsedNeverReveal: { literals: string[]; patterns: string[] }, result: { answer?: string; error?: string }) => {
+  const redactResult = (
+    parsedNeverReveal: { literals: string[]; patterns: string[] },
+    result: { answer?: string; error?: string; answered?: string; refused?: string },
+  ) => {
     const rules = compileRedactRules({
       literals: [...(config.redact?.literals ?? []), ...parsedNeverReveal.literals],
       patterns: [...(config.redact?.patterns ?? []), ...parsedNeverReveal.patterns],
     });
     const out = { ...result };
     if (out.answer !== undefined) {
-      const { text, redactedCount } = applyRedactions(out.answer, rules);
+      const parsed = parseAnswerMeta(out.answer);
+      const { text, redactedCount } = applyRedactions(parsed.answer, rules);
       out.answer = text;
+      out.answered = parsed.answered ?? out.answered;
+      out.refused = parsed.refused ?? out.refused;
       if (redactedCount > 0) {
         console.error(`redacted ${redactedCount} match(es) from an outgoing answer`);
       }
@@ -120,6 +127,8 @@ export function createHandler(
         fromPeer: question.from_peer,
         conversationId: question.conversation_id,
         hops: question.hops,
+        mode: question.mode,
+        brief: question.brief,
       };
       const task = isFirstTurn
         ? buildFirstTask(parsedPolicy.text, question.question, collectMemory(liveConfig), ctx, promptOpts)

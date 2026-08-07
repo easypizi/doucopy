@@ -79,6 +79,8 @@ export function buildMcpServer(
       description:
         "Ask another account's agent a question. It answers from its own memory (chat history, notes). " +
         "Pass conversation_id from a previous result to continue the same conversation. " +
+        "mode=discuss: collaborative multi-turn; reformulate as needed and pass brief instructions; " +
+        "keep going until you can give the human a FINAL answer (do not dump intermediate chatter). " +
         "Hosts may abort long waits and return pending early — that is normal. " +
         "On pending or peer_offline, immediately call check_reply with wait_seconds (do not ask the user). " +
         "Peers that are offline or unknown still get the question queued for 24 hours. " +
@@ -96,22 +98,26 @@ export function buildMcpServer(
           ),
         conversation_id: z.string().optional(),
         hops: z.number().int().min(0).max(MAX_HOPS).optional(),
+        mode: z.enum(["ask", "discuss"]).optional().describe("ask (default) or discuss"),
+        brief: z
+          .string()
+          .optional()
+          .describe("Short instructions for the responding agent (discuss/ask). Not shown as the question."),
       },
     },
-    async ({ peer, question, timeout_seconds, conversation_id, hops }, extra) => {
+    async ({ peer, question, timeout_seconds, conversation_id, hops, mode, brief }, extra) => {
       if (peer === fromPeer) {
         return json({ status: "error", error: "cannot ask yourself" });
       }
       let ticket_id: string;
       let convId: string;
       try {
-        ({ ticket_id, conversation_id: convId } = mailbox.enqueue(
-          peer,
-          fromPeer,
-          question,
-          conversation_id,
-          hops ?? 0,
-        ));
+        ({ ticket_id, conversation_id: convId } = mailbox.enqueue(peer, fromPeer, question, {
+          conversationId: conversation_id,
+          clientHops: hops ?? 0,
+          mode: mode === "discuss" ? "discuss" : "ask",
+          brief,
+        }));
       } catch (err) {
         if (err instanceof HopLimitError || err instanceof ConversationFullError) {
           return json({ status: "error", error: err.message });

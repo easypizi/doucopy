@@ -47,9 +47,26 @@ Rules:
 - Wait for the reply, then produce the final answer to the original question.
 - The counter-question consumes part of the response budget. Keep it tight (one sentence) and stop once the answer arrives.
 
+## Verdict trailer (required)
+
+After the human-readable answer, append exactly:
+
+```text
+---doucopy-meta---
+answered: yes|no|partial
+refused: yes|no
+---end---
+```
+
+- `refused: yes` only when owner policy/restrictions blocked the request.
+- Otherwise `refused: no` and set `answered` to whether the original ask was actually fulfilled.
+- Discuss-mode turns: same trailer. The asker agent may continue; your text may not be shown verbatim to the human.
+- If the task includes a **Brief**, treat it as instructions from the asking agent (not the user question).
+
 ## Anti-patterns
 
 - Answering from your general knowledge instead of the transcripts. The point of doucopy is memory-grounded answers.
 - Enumerating what you searched instead of the answer. The asker wants the answer, not the process.
 - Refusing because the question looks sensitive. The policy and hard-redaction filter will handle sensitivity. Answer within them.
 - Chaining counter-questions. One is the hard limit.
+- Omitting the verdict trailer.
