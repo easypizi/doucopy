@@ -13,6 +13,7 @@ import {
   loadChatHistory,
   saveChatHistory,
   withDialogPreview,
+  type AskDelivery,
   type ChatDialog,
   type ChatFeedItem,
 } from "../../chat-history.js";
@@ -20,6 +21,7 @@ import { localAsk, resolveLocalHarness } from "../../local-ask.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { SelectModal } from "../components/SelectModal.js";
 import { TextPrompt } from "../components/TextPrompt.js";
+import { DELIVERY_CHIP, deliveryFromPhase, formatDeliveryChip } from "../delivery-chip.js";
 import { useHoldKeyCapture } from "../key-capture.js";
 import { theme } from "../theme.js";
 import type { StatusSnapshot } from "../useStatusSnapshot.js";
@@ -42,13 +44,6 @@ type ScreenMode =
 
 function newId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-}
-
-function phaseStatusLine(phase: string | undefined, ticketId: string, offline: boolean): string {
-  const short = ticketId.slice(0, 8);
-  if (offline) return `queued offline · ticket ${short}`;
-  if (phase === "working") return `sent · answering · ticket ${short}`;
-  return `sent · queued · ticket ${short}`;
 }
 
 export type ChatScreenDeps = {
@@ -126,7 +121,21 @@ export function ChatScreen({
       return;
     }
     const hist = loadChatHistory(localHome);
-    if (hist.feed.length > 0) setFeed(hist.feed);
+    if (hist.feed.length > 0) {
+      // Drop in-flight chips from a previous session (poll is gone).
+      setFeed(
+        hist.feed.map((item) => {
+          if (item.kind !== "ask") return item;
+          const live =
+            item.delivery === "sending" ||
+            item.delivery === "queued" ||
+            item.delivery === "answering" ||
+            item.delivery === "offline";
+          if (!live && !item.pending) return item;
+          return { ...item, pending: false, delivery: live ? undefined : item.delivery };
+        }),
+      );
+    }
     if (hist.dialogs.length > 0) setDialogs(withDialogPreview(hist.dialogs, hist.feed));
     setActiveDialogId(hist.activeDialogId);
     setFilterDialogId(hist.filterDialogId);
@@ -205,8 +214,14 @@ export function ChatScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- prime once when peers appear
   }, [others, askPeerName]);
 
-  const push = (item: Omit<FeedItem, "id"> & { id?: string }) => {
-    setFeed((prev) => [...prev.slice(-80), { ...item, id: item.id ?? newId() }]);
+  const push = (item: Omit<FeedItem, "id"> & { id?: string }): string => {
+    const id = item.id ?? newId();
+    setFeed((prev) => [...prev.slice(-80), { ...item, id }]);
+    return id;
+  };
+
+  const patchFeed = (id: string, patch: Partial<FeedItem>) => {
+    setFeed((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   };
 
   const upsertDialog = (peer: string, conversationId: string | null): { id: string; conversationId: string | null } => {
@@ -253,15 +268,17 @@ export function ChatScreen({
     peer: string,
     dialogId: string,
     ticketId: string,
+    askId: string,
     modeForTicket: AskMode = "ask",
   ) => {
     if (!snap.config?.relay_url || !snap.config.token) return;
     setPending((n) => n + 1);
-    let lastPhase: string | undefined;
+    let lastDelivery: AskDelivery | undefined;
     try {
       for (let i = 0; i < REPLY_MAX; i += 1) {
         const reply = await fetchReplyFn(snap.config.relay_url, snap.config.token, ticketId, REPLY_WAIT);
         if (reply.status === "answered") {
+          patchFeed(askId, { delivery: "done", pending: false });
           const prefix = modeForTicket === "discuss" ? "FINAL · " : "";
           push({
             kind: "reply",
@@ -273,28 +290,27 @@ export function ChatScreen({
           return;
         }
         if (reply.status === "error") {
+          patchFeed(askId, { delivery: "error", pending: false });
           push({ kind: "status", peer, dialogId, text: `error: ${reply.error ?? "?"}` });
           return;
         }
         if (reply.status === "unknown_ticket") {
+          patchFeed(askId, { delivery: "error", pending: false });
           push({ kind: "status", peer, dialogId, text: "unknown_ticket (expired or relay restart)" });
           return;
         }
-        if (reply.status === "pending" && reply.phase && reply.phase !== lastPhase) {
-          lastPhase = reply.phase;
-          push({
-            kind: "status",
-            peer,
-            dialogId,
-            text:
-              modeForTicket === "discuss"
-                ? `discussing… · ${reply.phase === "working" ? "answering" : "queued"} · ${ticketId.slice(0, 8)}`
-                : phaseStatusLine(reply.phase, ticketId, false),
-          });
+        if (reply.status === "pending") {
+          const next = deliveryFromPhase(reply.phase);
+          if (next !== lastDelivery) {
+            lastDelivery = next;
+            patchFeed(askId, { delivery: next, pending: true });
+          }
         }
       }
+      patchFeed(askId, { delivery: "error", pending: false });
       push({ kind: "status", peer, dialogId, text: `timeout waiting for ${peer} (${ticketId.slice(0, 8)})` });
     } catch (err) {
+      patchFeed(askId, { delivery: "error", pending: false });
       push({
         kind: "status",
         peer,
@@ -325,7 +341,15 @@ export function ChatScreen({
       dialogsRef.current.find((d) => d.id === activeRef.current && d.peer === peer) ??
       dialogsRef.current.find((d) => d.peer === peer);
     const { id: dialogId, conversationId: conv } = upsertDialog(peer, current?.conversationId ?? null);
-    push({ kind: "ask", peer, dialogId, text: question, pending: true });
+    const askId = push({
+      kind: "ask",
+      peer,
+      dialogId,
+      text: question,
+      pending: true,
+      delivery: "answering",
+      mode: "ask",
+    });
     setPending((n) => n + 1);
     try {
       const r = await localAskFn({
@@ -336,11 +360,14 @@ export function ChatScreen({
       });
       if (r.conversationId) upsertDialog(peer, r.conversationId);
       if (r.error) {
+        patchFeed(askId, { delivery: "error", pending: false });
         push({ kind: "status", peer, dialogId, text: `error: ${r.error}` });
         return;
       }
+      patchFeed(askId, { delivery: "done", pending: false });
       push({ kind: "reply", peer, dialogId, text: r.answer ?? "" });
     } catch (err) {
+      patchFeed(askId, { delivery: "error", pending: false });
       push({
         kind: "status",
         peer,
@@ -364,12 +391,14 @@ export function ChatScreen({
       dialogsRef.current.find((d) => d.peer === peer);
     const { id: dialogId, conversationId: conv } = upsertDialog(peer, current?.conversationId ?? null);
 
-    push({
+    const askId = push({
       kind: "ask",
       peer,
       dialogId,
-      text: modeForTicket === "discuss" ? `[discuss] ${question}` : question,
+      text: question,
       pending: true,
+      delivery: "sending",
+      mode: modeForTicket,
     });
 
     try {
@@ -382,25 +411,21 @@ export function ChatScreen({
       });
       if (r.conversation_id) upsertDialog(peer, r.conversation_id);
       if (r.status === "answered") {
+        patchFeed(askId, { delivery: "done", pending: false });
         const prefix = modeForTicket === "discuss" ? "FINAL · " : "";
         push({ kind: "reply", peer, dialogId, text: `${prefix}${r.answer ?? ""}` });
         return;
       }
       if (r.status === "error") {
+        patchFeed(askId, { delivery: "error", pending: false });
         push({ kind: "status", peer, dialogId, text: `error: ${r.error ?? "?"}` });
         return;
       }
-      push({
-        kind: "status",
-        peer,
-        dialogId,
-        text:
-          modeForTicket === "discuss"
-            ? `discussing… · ${r.phase === "working" ? "answering" : "queued"} · ${r.ticket_id.slice(0, 8)}`
-            : phaseStatusLine(r.phase, r.ticket_id, r.status === "peer_offline"),
-      });
-      void pollTicket(peer, dialogId, r.ticket_id, modeForTicket);
+      const delivery = deliveryFromPhase(r.phase, r.status === "peer_offline");
+      patchFeed(askId, { delivery, pending: true });
+      void pollTicket(peer, dialogId, r.ticket_id, askId, modeForTicket);
     } catch (err) {
+      patchFeed(askId, { delivery: "error", pending: false });
       push({
         kind: "status",
         peer,
@@ -883,32 +908,41 @@ export function ChatScreen({
 
 function FeedLine({ item }: { item: FeedItem }) {
   if (item.kind === "ask") {
+    const delivery = item.delivery;
+    const chip = delivery ? DELIVERY_CHIP[delivery] : null;
+    const badge = item.mode === "discuss" ? "DISCUSS" : "ASK";
     return (
       <Box>
         <Text backgroundColor="cyan" color="black" bold>
           {" "}
-          ASK{" "}
+          {badge}{" "}
         </Text>
         <Text color={theme.accent} bold>
           {" "}
           → {item.peer}{" "}
         </Text>
+        {chip ? (
+          <Text color={chip.color} bold={delivery === "answering" || delivery === "offline"}>
+            {formatDeliveryChip(delivery!)}{" "}
+          </Text>
+        ) : null}
         <Text color={theme.highlight}>{item.text}</Text>
       </Box>
     );
   }
   if (item.kind === "reply") {
+    const isFinal = item.text.startsWith("FINAL · ");
     return (
       <Box>
         <Text backgroundColor="green" color="black" bold>
           {" "}
-          REPLY{" "}
+          {isFinal ? "FINAL" : "REPLY"}{" "}
         </Text>
         <Text color={theme.ok} bold>
           {" "}
           ← {item.peer}{" "}
         </Text>
-        <Text>{item.text}</Text>
+        <Text>{isFinal ? item.text.slice("FINAL · ".length) : item.text}</Text>
       </Box>
     );
   }
@@ -920,9 +954,8 @@ function FeedLine({ item }: { item: FeedItem }) {
     );
   }
   if (item.kind === "status") {
-    const answering = item.text.includes("answering") || item.text.includes("discussing");
     return (
-      <Text color={answering ? theme.warn : theme.dim}>
+      <Text color={theme.dim}>
         · {item.peer ? `${item.peer}: ` : ""}
         {item.text}
       </Text>

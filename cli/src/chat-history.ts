@@ -7,6 +7,9 @@ export const MAX_DIALOGS = 40;
 
 export type ChatFeedKind = "system" | "ask" | "reply" | "note" | "status";
 
+/** Ask delivery on the relay / peer (portable UI chip; no special fonts). */
+export type AskDelivery = "sending" | "queued" | "offline" | "answering" | "done" | "error";
+
 export interface ChatFeedItem {
   id: string;
   kind: ChatFeedKind;
@@ -14,6 +17,9 @@ export interface ChatFeedItem {
   dialogId?: string;
   text: string;
   pending?: boolean;
+  /** Live ticket phase for ask rows (updated in place while polling). */
+  delivery?: AskDelivery;
+  mode?: "ask" | "discuss";
 }
 
 export interface ChatDialog {

@@ -122,7 +122,9 @@ export function StatusScreen({
               <Box key={t.ticket_id}>
                 <Text color={theme.dim}>  ← </Text>
                 <Text>{t.from_peer.padEnd(14)} </Text>
-                <Text color={t.phase === "working" ? theme.warn : theme.dim}>{t.phase}</Text>
+                <Text color={t.phase === "working" ? theme.warn : theme.dim} bold={t.phase === "working"}>
+                  {t.phase === "working" ? "● answering" : "○ queued"}
+                </Text>
                 <Text color={theme.dim}>
                   {" "}
                   {t.mode} · {t.question_preview.slice(0, 36)}
@@ -140,12 +142,23 @@ export function StatusScreen({
               <Box key={t.ticket_id}>
                 <Text color={theme.dim}>  → </Text>
                 <Text>{t.to_peer.padEnd(16)} </Text>
-                <Text color={statusColor(t.status)}>
+                <Text
+                  color={
+                    t.status === "pending" && t.phase === "working"
+                      ? theme.warn
+                      : statusColor(t.status)
+                  }
+                  bold={t.status === "pending" && t.phase === "working"}
+                >
                   {t.status === "pending" && t.phase === "working"
-                    ? "answering"
+                    ? "● answering"
                     : t.status === "pending" && t.phase === "queued"
-                      ? "queued"
-                      : t.status}
+                      ? "○ queued"
+                      : t.status === "answered"
+                        ? "✓ done"
+                        : t.status === "error"
+                          ? "× error"
+                          : t.status}
                 </Text>
                 <Text color={theme.dim}>  {t.ticket_id.slice(0, 8)}</Text>
               </Box>

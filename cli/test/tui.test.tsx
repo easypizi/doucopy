@@ -228,11 +228,15 @@ describe("Chat pending poll", () => {
             status: "pending",
             ticket_id: "ticket-pending-1",
             conversation_id: "conv-1",
+            phase: "queued",
           }),
           fetchReply: async () => {
             polls += 1;
-            if (polls < 2) {
-              return { status: "pending", ticket_id: "ticket-pending-1" };
+            if (polls === 1) {
+              return { status: "pending", ticket_id: "ticket-pending-1", phase: "queued" };
+            }
+            if (polls === 2) {
+              return { status: "pending", ticket_id: "ticket-pending-1", phase: "working" };
             }
             return {
               status: "answered",
@@ -244,10 +248,54 @@ describe("Chat pending poll", () => {
       />,
     );
     cleanups.push(unmount);
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 600));
     const frame = lastFrame() ?? "";
     expect(frame).toContain("PONG-from-work");
-    expect(polls).toBeGreaterThanOrEqual(2);
+    expect(frame).toMatch(/✓ done/);
+    expect(polls).toBeGreaterThanOrEqual(3);
+  });
+
+  it("shows answering chip while peer phase is working", async () => {
+    const { ChatScreen } = await import("../src/tui/screens/chat.js");
+    const snap = emptySnap({
+      joined: true,
+      config: {
+        self_peer: "Ivan",
+        relay_url: "https://r.example.com",
+        token: "tok",
+        responder: { model: "composer-2.5", harness: "cursor-agent" },
+      },
+      peers: [
+        { name: "Ivan", online: true, self: true },
+        { name: "work", online: true, self: false },
+      ],
+    });
+    let resolveReply: ((v: { status: string; ticket_id: string; phase?: string; answer?: string }) => void) | null =
+      null;
+    const { lastFrame, unmount } = render(
+      <ChatScreen
+        snap={snap}
+        inputActive
+        initialAsk={{ peer: "work", question: "slow question" }}
+        deps={{
+          askPeer: async () => ({
+            status: "pending",
+            ticket_id: "ticket-slow-1",
+            conversation_id: "conv-slow",
+            phase: "working",
+          }),
+          fetchReply: () =>
+            new Promise((resolve) => {
+              resolveReply = resolve;
+            }),
+        }}
+      />,
+    );
+    cleanups.push(unmount);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(lastFrame() ?? "").toMatch(/● answering/);
+    resolveReply?.({ status: "answered", ticket_id: "ticket-slow-1", answer: "ok" });
+    await new Promise((r) => setTimeout(r, 200));
   });
 });
 
