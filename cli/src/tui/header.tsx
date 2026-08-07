@@ -2,11 +2,44 @@ import { Box, Text } from "ink";
 import { APP_VERSION, theme } from "./theme.js";
 import type { StatusSnapshot } from "./useStatusSnapshot.js";
 
-function Chip({ label, value, ok }: { label: string; value: string; ok?: boolean }) {
+/** Color for the incoming open count: green 1–10, yellow 11–29, red 30+. */
+export function incomingValueColor(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return theme.dim;
+  if (n >= 30) return theme.err;
+  if (n > 10) {
+    // 11 → soft yellow, 29 → orange
+    const t = (Math.min(n, 29) - 11) / 18;
+    const r = 253;
+    const g = Math.round(224 - t * (224 - 120));
+    const b = Math.round(71 - t * 71);
+    return `#${[r, g, b].map((c) => c.toString(16).padStart(2, "0")).join("")}`;
+  }
+  // 1 → light green, 10 → strong green
+  const t = (Math.min(n, 10) - 1) / 9;
+  const r = Math.round(134 - t * (134 - 22));
+  const g = Math.round(239 - t * (239 - 163));
+  const b = Math.round(172 - t * (172 - 74));
+  return `#${[r, g, b].map((c) => c.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function Chip({
+  label,
+  value,
+  ok,
+  valueColor,
+}: {
+  label: string;
+  value: string;
+  ok?: boolean;
+  valueColor?: string;
+}) {
+  const color =
+    valueColor
+    ?? (ok === undefined ? theme.highlight : ok ? theme.ok : theme.dim);
   return (
     <Box marginRight={2}>
       <Text color={theme.dim}>{label} </Text>
-      <Text color={ok === undefined ? theme.highlight : ok ? theme.ok : theme.dim} bold={ok === true}>
+      <Text color={color} bold={ok === true}>
         {value}
       </Text>
     </Box>
@@ -77,7 +110,12 @@ export function Header({
               value={`${snap.onlineCount}/${snap.peerCount} online`}
               ok={snap.onlineCount > 0}
             />
-            <Chip label="incoming" value={String(incoming)} ok={incoming === 0 ? undefined : false} />
+            <Chip
+              label="incoming"
+              value={String(incoming)}
+              valueColor={incomingValueColor(incoming)}
+              ok={incoming > 0 ? true : undefined}
+            />
             <Chip label="dialogs" value={String(dialogs)} ok={dialogs > 0 ? true : undefined} />
           </Box>
           {!snap.relayOk && snap.relayError ? (

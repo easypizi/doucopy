@@ -4,7 +4,8 @@ import path from "node:path";
 import React from "react";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it } from "vitest";
-import { Header } from "../src/tui/header.js";
+import { Header, incomingValueColor } from "../src/tui/header.js";
+import { theme } from "../src/tui/theme.js";
 import { App } from "../src/tui/app.js";
 import { SettingsScreen } from "../src/tui/screens/settings.js";
 import { StatusScreen } from "../src/tui/screens/status.js";
@@ -55,6 +56,18 @@ function writeConfigHome(): string {
   writeFileSync(path.join(home, ".doucopy", "config.json"), JSON.stringify(config, null, 2));
   return home;
 }
+
+describe("incomingValueColor", () => {
+  it("scales green then yellow then red", () => {
+    expect(incomingValueColor(0)).toBe(theme.dim);
+    expect(incomingValueColor(1)).toMatch(/^#[0-9a-f]{6}$/);
+    expect(incomingValueColor(10)).toMatch(/^#[0-9a-f]{6}$/);
+    expect(incomingValueColor(1) < incomingValueColor(10) || incomingValueColor(1) !== incomingValueColor(10)).toBe(true);
+    expect(incomingValueColor(15)).toMatch(/^#[0-9a-f]{6}$/);
+    expect(incomingValueColor(30)).toBe(theme.err);
+    expect(incomingValueColor(99)).toBe(theme.err);
+  });
+});
 
 describe("TUI chrome", () => {
   it("renders tab labels", () => {
