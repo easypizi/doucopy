@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -13,6 +14,10 @@ const LEGACY_LABEL = "com.agent-link.responder";
 
 export const RESPONDER_DAEMON_UNSUPPORTED =
   "responder daemon is only supported on macOS (launchd) and Windows (Task Scheduler)";
+
+/** Thrown when install would load launchd/Task Scheduler against a non-real $HOME (e.g. vitest tmp). */
+export const FOREIGN_HOME_INSTALL =
+  "refusing to install responder daemon for a non-user home (would break cursor-agent PATH). Set DOUCOPY_ALLOW_FOREIGN_HOME=1 only for intentional isolation tests.";
 
 export function responderDaemonSupported(
   platform: NodeJS.Platform = process.platform,
@@ -69,6 +74,7 @@ export function renderPlist(
   repoRoot: string,
   home: string,
   keepAwake = true,
+  pathHome: string = homedir(),
 ): string {
   const template = readFileSync(
     path.join(repoRoot, "daemon/launchd", `${LABEL}.plist`),
@@ -76,7 +82,20 @@ export function renderPlist(
   );
   return template
     .replaceAll("__PROGRAM_ARGUMENTS__", programArgumentsXml(nodeBin, repoRoot, keepAwake))
-    .replaceAll("__HOME__", home);
+    .replaceAll("__HOME__", home)
+    // Binary lookup must use the real user home. Log/config paths may use `home`
+    // (tests write under tmp), but PATH must still find ~/.local/bin/cursor-agent.
+    .replaceAll("__PATH_HOME__", pathHome);
+}
+
+/** Block installing the real OS supervisor for vitest / foreign HOME directories. */
+export function assertInstallableHome(home: string): void {
+  if (process.env.DOUCOPY_ALLOW_FOREIGN_HOME === "1") return;
+  const real = path.resolve(homedir());
+  const target = path.resolve(home);
+  if (target !== real) {
+    throw new Error(`${FOREIGN_HOME_INSTALL} (home=${target}, expected=${real})`);
+  }
 }
 
 // Tears down the pre-rename daemon (label + plist) if it's still installed,
@@ -115,6 +134,7 @@ export function installDaemon(
   platform: NodeJS.Platform = process.platform,
 ): void {
   assertResponderDaemonSupported(platform);
+  assertInstallableHome(home);
   if (platform === "win32") {
     const root = packageRoot();
     const daemonEntry = path.join(root, "daemon/dist/index.js");

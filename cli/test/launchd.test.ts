@@ -3,8 +3,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { homedir } from "node:os";
 import {
+  FOREIGN_HOME_INSTALL,
   RESPONDER_DAEMON_UNSUPPORTED,
+  assertInstallableHome,
   installDaemon,
   isDaemonRunning,
   programArgumentsXml,
@@ -57,10 +60,22 @@ describe("launchd keep_awake plist", () => {
   });
 
   it("renders a full plist with caffeinate args", () => {
-    const plist = renderPlist("/usr/bin/node", ROOT, "/Users/me", true);
+    const plist = renderPlist("/usr/bin/node", ROOT, "/Users/me", true, "/Users/real");
     expect(plist).toContain("<string>/usr/bin/caffeinate</string>");
     expect(plist).toContain("/Users/me/.doucopy/responder.log");
+    expect(plist).toContain("/Users/real/.local/bin");
+    expect(plist).not.toContain("/Users/me/.local/bin");
     expect(plist).toContain("com.doucopy.responder");
+  });
+
+  it("refuses to install against a foreign (temp) home", () => {
+    const home = mkdtempSync(path.join(tmpdir(), "doucopy-foreign-"));
+    expect(() => assertInstallableHome(home)).toThrow(/non-user home/);
+    expect(() => installDaemon(home, "darwin")).toThrow(FOREIGN_HOME_INSTALL);
+  });
+
+  it("allows the real user home", () => {
+    expect(() => assertInstallableHome(homedir())).not.toThrow();
   });
 
   it("reads keep_awake.enabled from config (default true)", () => {

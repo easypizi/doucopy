@@ -150,15 +150,24 @@ function patchKeepAwake(draft: DoucopyConfigFile, patch: Partial<KeepAwakeSettin
   return applyKeepAwake(draft, { ...cur, ...patch });
 }
 
+export type SettingsScreenDeps = {
+  startDaemon?: typeof startDaemon;
+  stopDaemon?: typeof stopDaemon;
+};
+
 export function SettingsScreen({
   home = homedir(),
   inputActive,
   onSaved,
+  deps,
 }: {
   home?: string;
   inputActive: boolean;
   onSaved?: () => void;
+  deps?: SettingsScreenDeps;
 }) {
+  const startDaemonFn = deps?.startDaemon ?? startDaemon;
+  const stopDaemonFn = deps?.stopDaemon ?? stopDaemon;
   const initial = readConfigFile(home);
   const [draft, setDraft] = useState<DoucopyConfigFile | null>(initial ? structuredClone(initial) : null);
   const [baseline, setBaseline] = useState(() => (initial ? JSON.stringify(initial) : ""));
@@ -200,8 +209,8 @@ export function SettingsScreen({
         setMessage(`saved (${RESPONDER_DAEMON_UNSUPPORTED})`);
       } else {
         try {
-          stopDaemon(home);
-          startDaemon(home);
+          stopDaemonFn(home);
+          startDaemonFn(home);
           setMessage("saved and daemon restarted");
         } catch (err) {
           setMessage(`saved, but restart failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -548,8 +557,8 @@ export function SettingsScreen({
               setBaseline(JSON.stringify(result.config));
               if (restartOnSave && responderDaemonSupported()) {
                 try {
-                  stopDaemon(home);
-                  startDaemon(home);
+                  stopDaemonFn(home);
+                  startDaemonFn(home);
                   setMessage(`renamed to ${result.peer}; daemon restarted`);
                 } catch (err) {
                   setMessage(

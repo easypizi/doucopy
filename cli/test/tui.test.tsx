@@ -134,9 +134,16 @@ describe("TUI chrome", () => {
 });
 
 describe("Settings screen", () => {
+  const noopDaemon = {
+    startDaemon: () => undefined,
+    stopDaemon: () => undefined,
+  };
+
   it("lists keep awake and supports Esc discard confirm", async () => {
     const home = writeConfigHome();
-    const { lastFrame, stdin, unmount } = render(<SettingsScreen home={home} inputActive />);
+    const { lastFrame, stdin, unmount } = render(
+      <SettingsScreen home={home} inputActive deps={noopDaemon} />,
+    );
     cleanups.push(unmount);
     await new Promise((r) => setTimeout(r, 50));
     let frame = lastFrame() ?? "";
@@ -161,7 +168,9 @@ describe("Settings screen", () => {
 
   it("clears dirty after save so Esc does not discard", async () => {
     const home = writeConfigHome();
-    const { lastFrame, stdin, unmount } = render(<SettingsScreen home={home} inputActive />);
+    const { lastFrame, stdin, unmount } = render(
+      <SettingsScreen home={home} inputActive deps={noopDaemon} />,
+    );
     cleanups.push(unmount);
     await new Promise((r) => setTimeout(r, 50));
     for (let i = 0; i < 9; i += 1) {
