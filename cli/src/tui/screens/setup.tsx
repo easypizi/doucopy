@@ -308,21 +308,32 @@ export function SetupScreen({
     if (phase.kind === "finalize") {
       ran.current = key;
       void (async () => {
-        const result = await finalizeJoinFn(home, {
-          relayUrl: data.relayUrl!,
-          peer: data.peer!,
-          token: data.token!,
-          askers: data.askers ?? [],
-          responder: data.responder ?? "asker-only",
-          wantSkills: data.wantSkills ?? false,
-          neverReveal: data.neverReveal ?? [],
-          restrictions: data.restrictions ?? safeRestrictions(),
-        });
-        if (result.ok) {
-          clearDraftFn(home);
-          if (data.relayUrl) pushHistory(home, { relay_url: data.relayUrl, peer_name: data.peer });
+        try {
+          const result = await finalizeJoinFn(home, {
+            relayUrl: data.relayUrl!,
+            peer: data.peer!,
+            token: data.token!,
+            askers: data.askers ?? [],
+            responder: data.responder ?? "asker-only",
+            wantSkills: data.wantSkills ?? false,
+            neverReveal: data.neverReveal ?? [],
+            restrictions: data.restrictions ?? safeRestrictions(),
+          });
+          if (result.ok) {
+            clearDraftFn(home);
+            if (data.relayUrl) pushHistory(home, { relay_url: data.relayUrl, peer_name: data.peer });
+          }
+          setPhase({ kind: "done", ok: result.ok, messages: [...result.messages, ...result.errors] });
+        } catch (err) {
+          setPhase({
+            kind: "done",
+            ok: false,
+            messages: [
+              `setup crashed: ${err instanceof Error ? err.message : String(err)}`,
+              'Config may still be usable. Try "doucopy restart" or run Setup again.',
+            ],
+          });
         }
-        setPhase({ kind: "done", ok: result.ok, messages: [...result.messages, ...result.errors] });
       })();
     }
   }, [

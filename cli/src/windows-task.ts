@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { hostname, userInfo } from "node:os";
 import path from "node:path";
 
 export const WINDOWS_TASK_NAME = "doucopy-responder";
@@ -34,6 +35,19 @@ function cmdQuote(value: string): string {
   return `"${value.replace(/"/g, "")}"`;
 }
 
+/**
+ * DOMAIN\\user for Task Scheduler InteractiveToken tasks.
+ * Win11 rejects XML without UserId ("Access is denied" for non-admin create).
+ */
+export function windowsTaskUserId(
+  env: NodeJS.ProcessEnv = process.env,
+  info: { username: string } = userInfo(),
+): string {
+  const user = (env.USERNAME || info.username || "User").trim();
+  const domain = (env.USERDOMAIN || hostname() || ".").trim();
+  return `${domain}\\${user}`;
+}
+
 export function windowsCmdPath(home: string): string {
   return path.join(home, ".doucopy", "responder.cmd");
 }
@@ -54,9 +68,14 @@ export function renderWindowsWrapper(nodeBin: string, daemonEntry: string, home:
   return lines.join("\r\n");
 }
 
-export function renderWindowsTaskXml(cmdPath: string, home: string): string {
+export function renderWindowsTaskXml(
+  cmdPath: string,
+  home: string,
+  userId: string = windowsTaskUserId(),
+): string {
   const workDir = path.join(home, ".doucopy");
   const args = `/c ${cmdQuote(cmdPath)}`;
+  const userXml = xmlEscape(userId);
   return [
     '<?xml version="1.0" encoding="UTF-16"?>',
     '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',
@@ -66,10 +85,12 @@ export function renderWindowsTaskXml(cmdPath: string, home: string): string {
     "  <Triggers>",
     "    <LogonTrigger>",
     "      <Enabled>true</Enabled>",
+    `      <UserId>${userXml}</UserId>`,
     "    </LogonTrigger>",
     "  </Triggers>",
     "  <Principals>",
     '    <Principal id="Author">',
+    `      <UserId>${userXml}</UserId>`,
     "      <LogonType>InteractiveToken</LogonType>",
     "      <RunLevel>LeastPrivilege</RunLevel>",
     "    </Principal>",
@@ -123,6 +144,7 @@ export function writeWindowsDaemonFiles(
   home: string,
   nodeBin: string,
   daemonEntry: string,
+  userId: string = windowsTaskUserId(),
 ): { cmdPath: string; xmlPath: string } {
   const dir = path.join(home, ".doucopy");
   mkdirSync(path.join(dir, "workspace"), { recursive: true });
@@ -130,7 +152,7 @@ export function writeWindowsDaemonFiles(
   const xmlPath = windowsTaskXmlPath(home);
   writeFileSync(cmdPath, renderWindowsWrapper(nodeBin, daemonEntry, home), "utf8");
   // schtasks /Create /XML expects Unicode on Windows.
-  const xml = renderWindowsTaskXml(cmdPath, home);
+  const xml = renderWindowsTaskXml(cmdPath, home, userId);
   writeFileSync(xmlPath, `\ufeff${xml}`, { encoding: "utf16le" });
   return { cmdPath, xmlPath };
 }
@@ -140,18 +162,26 @@ export function installWindowsDaemon(
   nodeBin: string,
   daemonEntry: string,
   run: SchtasksRunner = defaultSchtasks,
+  userId: string = windowsTaskUserId(),
 ): void {
   if (!existsSync(daemonEntry)) {
     throw new Error(`daemon build not found at ${daemonEntry}, run: npm run build`);
   }
-  const { xmlPath } = writeWindowsDaemonFiles(home, nodeBin, daemonEntry);
+  const { xmlPath } = writeWindowsDaemonFiles(home, nodeBin, daemonEntry, userId);
   // Best-effort cleanup of a previous registration.
   run(["/End", "/TN", WINDOWS_TASK_NAME]);
   run(["/Delete", "/TN", WINDOWS_TASK_NAME, "/F"]);
+  // /XML + InteractiveToken + UserId: works without admin on Win11 22H2+.
+  // Do not pass /RU or /RP — those force Password logon and need elevation.
   const created = run(["/Create", "/TN", WINDOWS_TASK_NAME, "/XML", xmlPath, "/F"]);
   if (created.status !== 0) {
     const detail = (created.stderr || created.stdout || "schtasks /Create failed").trim();
-    throw new Error(`failed to register Windows task ${WINDOWS_TASK_NAME}: ${detail}`);
+    throw new Error(
+      `failed to register Windows task ${WINDOWS_TASK_NAME}: ${detail}` +
+        ` (user=${userId}). Try: open PowerShell as your normal user (not Admin),` +
+        ` then run "doucopy restart". If a stale elevated task exists, delete` +
+        ` "${WINDOWS_TASK_NAME}" in Task Scheduler first.`,
+    );
   }
   const started = run(["/Run", "/TN", WINDOWS_TASK_NAME]);
   if (started.status !== 0) {

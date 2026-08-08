@@ -2,13 +2,16 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import {
   WINDOWS_TASK_NAME,
+  installWindowsDaemon,
   isWindowsDaemonRunning,
   parseSchtasksRunning,
   renderWindowsTaskXml,
   renderWindowsWrapper,
   windowsCmdPath,
+  windowsTaskUserId,
   windowsTaskXmlPath,
 } from "../src/windows-task.js";
 
@@ -37,13 +40,22 @@ describe("renderWindowsWrapper", () => {
   });
 });
 
+describe("windowsTaskUserId", () => {
+  it("builds DOMAIN\\user from env", () => {
+    expect(windowsTaskUserId({ USERDOMAIN: "DESKTOP-X", USERNAME: "ivan" }, { username: "fallback" })).toBe(
+      "DESKTOP-X\\ivan",
+    );
+  });
+});
+
 describe("renderWindowsTaskXml", () => {
   it("registers logon trigger, restart-on-failure, and the wrapper cmd", () => {
     const home = mkdtempSync(path.join(tmpdir(), "doucopy-win-"));
     const cmdPath = windowsCmdPath(home);
-    const xml = renderWindowsTaskXml(cmdPath, home);
+    const xml = renderWindowsTaskXml(cmdPath, home, "DESKTOP\\ivan");
     expect(xml).toContain("LogonTrigger");
     expect(xml).toContain("InteractiveToken");
+    expect(xml).toContain("<UserId>DESKTOP\\ivan</UserId>");
     expect(xml).toContain("RestartOnFailure");
     expect(xml).toContain("<Command>cmd.exe</Command>");
     expect(xml).toContain(cmdPath.replace(/&/g, "&amp;"));
@@ -51,7 +63,7 @@ describe("renderWindowsTaskXml", () => {
   });
 
   it("escapes XML special characters in paths", () => {
-    const xml = renderWindowsTaskXml("C:\\a&b\\responder.cmd", "C:\\a&b");
+    const xml = renderWindowsTaskXml("C:\\a&b\\responder.cmd", "C:\\a&b", "A\\b");
     expect(xml).toContain("C:\\a&amp;b\\responder.cmd");
     expect(xml).not.toContain("C:\\a&b\\responder.cmd");
   });
@@ -79,5 +91,28 @@ describe("isWindowsDaemonRunning", () => {
   it("returns false when the task is missing", () => {
     const run = vi.fn().mockReturnValue({ status: 1, stdout: "", stderr: "ERROR: The system cannot find the file specified." });
     expect(isWindowsDaemonRunning(run)).toBe(false);
+  });
+});
+
+describe("installWindowsDaemon", () => {
+  it("writes UTF-16 XML with UserId and creates the task without /RU", () => {
+    const home = mkdtempSync(path.join(tmpdir(), "doucopy-win-install-"));
+    const daemonEntry = path.join(home, "daemon.js");
+    mkdirSync(path.dirname(daemonEntry), { recursive: true });
+    writeFileSync(daemonEntry, "// stub\n");
+    const run = vi.fn().mockReturnValue({ status: 0, stdout: "SUCCESS", stderr: "" });
+    installWindowsDaemon(home, "C:\\node.exe", daemonEntry, run, "PC\\ivan");
+    const createCall = run.mock.calls.find((c) => c[0]?.[0] === "/Create");
+    expect(createCall?.[0]).toEqual([
+      "/Create",
+      "/TN",
+      WINDOWS_TASK_NAME,
+      "/XML",
+      windowsTaskXmlPath(home),
+      "/F",
+    ]);
+    expect(createCall?.[0]).not.toContain("/RU");
+    const xml = readFileSync(windowsTaskXmlPath(home), "utf16le");
+    expect(xml).toContain("<UserId>PC\\ivan</UserId>");
   });
 });

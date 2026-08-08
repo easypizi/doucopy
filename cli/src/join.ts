@@ -594,8 +594,18 @@ export async function finalizeJoin(home: string, input: JoinFinalizeInput): Prom
     return { ok: true, messages, errors };
   }
 
-  installDaemon(home);
-  messages.push("installed and started the responder daemon");
+  try {
+    installDaemon(home);
+    messages.push("installed and started the responder daemon");
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    errors.push(`daemon install failed: ${detail}`);
+    errors.push('config and MCP were still written. Fix the daemon with "doucopy restart", or continue asker-only for now.');
+    // Keep draft cleared only when join otherwise succeeded enough to use MCP.
+    clearDraft(home);
+    messages.push("restart your coding agent (Cursor / Claude Code / Codex) so it picks up the doucopy MCP server");
+    return { ok: false, messages, errors };
+  }
 
   for (let i = 0; i < 15; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 2000));
