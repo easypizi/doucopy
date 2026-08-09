@@ -1,9 +1,10 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CHAT_HISTORY_SCHEMA,
+  clampFeedText,
   loadChatHistory,
   saveChatHistory,
   withDialogPreview,
@@ -37,6 +38,58 @@ describe("chat-history", () => {
     expect(loaded.feed).toHaveLength(2);
     expect(loaded.activeDialogId).toBe("d1");
     expect(loaded.askPeerName).toBe("alice");
+  });
+
+  it("clampFeedText collapses huge status dumps to one short line", () => {
+    const dump = [
+      "error: unexpected argument '--sandbox' found",
+      "tip: to pass '--sandbox' as a value, use '-- --sandbox'",
+      "Opened Codex v0.142.0",
+      "workdir: /tmp/x",
+      "model: gpt-5",
+      "a".repeat(500),
+    ].join("\n");
+    const clamped = clampFeedText(dump, "status");
+    expect(clamped.includes("\n")).toBe(false);
+    expect(clamped.length).toBeLessThanOrEqual(360);
+    expect(clamped.endsWith("…")).toBe(true);
+  });
+
+  it("clampFeedText keeps reply newlines but caps line count", () => {
+    const body = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n");
+    const clamped = clampFeedText(body, "reply");
+    expect(clamped.split("\n").length).toBeLessThanOrEqual(25);
+    expect(clamped).toContain("…");
+  });
+
+  it("load clamps oversized status text from disk", () => {
+    const home = mkdtempSync(path.join(tmpdir(), "doucopy-chat-clamp-"));
+    saveChatHistory(home, {
+      schema_version: CHAT_HISTORY_SCHEMA,
+      dialogs: [],
+      feed: [
+        {
+          id: "f1",
+          kind: "status",
+          peer: "(local)",
+          text: `error: boom\n${"x".repeat(800)}`,
+        },
+      ],
+      activeDialogId: null,
+      filterDialogId: null,
+      askPeerName: null,
+      updatedAt: 1,
+    });
+    // Bypass save clamping by rewriting the file with a huge raw status.
+    const file = path.join(home, ".doucopy", "chat-history.json");
+    const raw = JSON.parse(readFileSync(file, "utf8")) as {
+      feed: Array<{ text: string }>;
+    };
+    raw.feed[0]!.text = `error: boom\n${"y".repeat(800)}`;
+    writeFileSync(file, JSON.stringify(raw));
+    const loaded = loadChatHistory(home);
+    expect(loaded.feed[0]!.text.length).toBeLessThanOrEqual(360);
+    expect(loaded.feed[0]!.text.includes("\n")).toBe(false);
   });
 
   it("adds lastPreview for dialog picker", () => {

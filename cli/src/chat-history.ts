@@ -4,6 +4,11 @@ import path from "node:path";
 export const CHAT_HISTORY_SCHEMA = 1;
 export const MAX_FEED = 200;
 export const MAX_DIALOGS = 40;
+/** Status/system lines (Codex stderr dumps) stay one short row. */
+export const MAX_STATUS_TEXT = 360;
+/** Ask/reply bodies may be multi-line but still bounded. */
+export const MAX_BODY_TEXT = 2500;
+export const MAX_BODY_LINES = 24;
 
 export type ChatFeedKind = "system" | "ask" | "reply" | "note" | "status";
 
@@ -20,6 +25,27 @@ export interface ChatFeedItem {
   /** Live ticket phase for ask rows (updated in place while polling). */
   delivery?: AskDelivery;
   mode?: "ask" | "discuss";
+}
+
+/**
+ * Clamp feed text so one bad harness error cannot blow past the TUI viewport.
+ * Status/system/note collapse whitespace; ask/reply keep newlines with caps.
+ */
+export function clampFeedText(text: string, kind: ChatFeedKind): string {
+  if (kind === "status" || kind === "system" || kind === "note") {
+    const one = text.replace(/\s+/gu, " ").trim();
+    if (one.length <= MAX_STATUS_TEXT) return one;
+    return `${one.slice(0, MAX_STATUS_TEXT - 1)}…`;
+  }
+  const lines = text.replace(/\r\n/gu, "\n").split("\n");
+  let out = lines.slice(0, MAX_BODY_LINES).join("\n");
+  if (lines.length > MAX_BODY_LINES) out += "\n…";
+  if (out.length > MAX_BODY_TEXT) out = `${out.slice(0, MAX_BODY_TEXT - 1)}…`;
+  return out;
+}
+
+function clampFeedItems(feed: ChatFeedItem[]): ChatFeedItem[] {
+  return feed.map((item) => ({ ...item, text: clampFeedText(item.text, item.kind) }));
 }
 
 export interface ChatDialog {
@@ -66,7 +92,7 @@ function migrate(raw: Partial<ChatHistoryFile>): ChatHistoryFile {
   return {
     schema_version: CHAT_HISTORY_SCHEMA,
     dialogs: Array.isArray(raw.dialogs) ? raw.dialogs.slice(0, MAX_DIALOGS) : base.dialogs,
-    feed: Array.isArray(raw.feed) ? raw.feed.slice(-MAX_FEED) : base.feed,
+    feed: Array.isArray(raw.feed) ? clampFeedItems(raw.feed.slice(-MAX_FEED)) : base.feed,
     activeDialogId: typeof raw.activeDialogId === "string" || raw.activeDialogId === null
       ? (raw.activeDialogId ?? null)
       : null,
@@ -97,7 +123,7 @@ export function saveChatHistory(home: string, history: ChatHistoryFile): void {
   const next: ChatHistoryFile = {
     schema_version: CHAT_HISTORY_SCHEMA,
     dialogs: history.dialogs.slice(0, MAX_DIALOGS),
-    feed: history.feed.slice(-MAX_FEED),
+    feed: clampFeedItems(history.feed.slice(-MAX_FEED)),
     activeDialogId: history.activeDialogId,
     filterDialogId: history.filterDialogId,
     askPeerName: history.askPeerName,

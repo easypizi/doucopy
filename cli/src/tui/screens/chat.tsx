@@ -1,4 +1,4 @@
-import { Box, Text, useApp, useInput } from "ink";
+import { Box, Text, useApp, useInput, useWindowSize } from "ink";
 import TextInput from "ink-text-input";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -10,6 +10,7 @@ import {
   type IncomingTicket,
 } from "../../api.js";
 import {
+  clampFeedText,
   loadChatHistory,
   saveChatHistory,
   withDialogPreview,
@@ -93,7 +94,7 @@ export function ChatScreen({
   const welcomeItem: FeedItem = {
     id: "welcome",
     kind: "system",
-    text: "Type a question and Enter — pick a peer or local. /ask · /discuss · /incoming · /local · /dialogs (saved across tabs/restarts).",
+    text: "Type a question and Enter — pick a peer or local. /ask · /discuss · /incoming · /local · /wipe · /dialogs · PgUp/PgDn to scroll (saved across tabs/restarts).",
   };
 
   const [feed, setFeed] = useState<FeedItem[]>([welcomeItem]);
@@ -108,11 +109,14 @@ export function ChatScreen({
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [incomingFocus, setIncomingFocus] = useState<IncomingTicket | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  /** Items hidden below the viewport (0 = pinned to newest). */
+  const [scrollFromBottom, setScrollFromBottom] = useState(0);
   const dialogsRef = useRef(dialogs);
   const activeRef = useRef(activeDialogId);
   const primedRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const staleClearedRef = useRef<string | null>(null);
+  const { rows: termRows } = useWindowSize();
   useHoldKeyCapture(inputActive && mode === "feed");
 
   useEffect(() => {
@@ -216,7 +220,8 @@ export function ChatScreen({
 
   const push = (item: Omit<FeedItem, "id"> & { id?: string }): string => {
     const id = item.id ?? newId();
-    setFeed((prev) => [...prev.slice(-80), { ...item, id }]);
+    const text = clampFeedText(item.text, item.kind);
+    setFeed((prev) => [...prev.slice(-80), { ...item, id, text }]);
     return id;
   };
 
@@ -486,6 +491,18 @@ export function ChatScreen({
       else exit();
       return;
     }
+    if (line === "/wipe") {
+      setScrollFromBottom(0);
+      setFeed([
+        welcomeItem,
+        {
+          id: newId(),
+          kind: "system",
+          text: "Cleared chat feed. Threads kept (/dialogs).",
+        },
+      ]);
+      return;
+    }
     if (line === "/clear" || line === "/none" || line === "/stop") {
       setAskPeerName(null);
       setFilterDialogId(null);
@@ -590,7 +607,7 @@ export function ChatScreen({
     if (line.startsWith("/")) {
       push({
         kind: "system",
-        text: "Commands: /ask · /discuss · /incoming · /local · /clear · /dialogs · /all · /new · /quit",
+        text: "Commands: /ask · /discuss · /incoming · /local · /clear · /wipe · /dialogs · /all · /new · /quit",
       });
       return;
     }
@@ -608,6 +625,19 @@ export function ChatScreen({
     openAskPicker(line);
   };
 
+  const visibleFeed = filterDialogId
+    ? feed.filter((f) => !f.dialogId || f.dialogId === filterDialogId)
+    : feed;
+  // Header/tabs/footer live outside Chat; reserve chrome inside the panel.
+  const feedBudget = Math.max(4, Math.min(40, (termRows || 24) - 14));
+  const maxScroll = Math.max(0, visibleFeed.length - feedBudget);
+  const pinnedOffset = Math.min(scrollFromBottom, maxScroll);
+  const windowStart = Math.max(0, visibleFeed.length - feedBudget - pinnedOffset);
+  const windowEnd = visibleFeed.length - pinnedOffset;
+  const windowedFeed = visibleFeed.slice(windowStart, windowEnd);
+  const olderCount = windowStart;
+  const newerCount = pinnedOffset;
+
   useInput(
     (input, key) => {
       if (mode !== "feed") return;
@@ -622,6 +652,15 @@ export function ChatScreen({
         }
         return;
       }
+      const step = Math.max(1, Math.floor(feedBudget / 2));
+      if (key.pageUp || (key.ctrl && key.upArrow)) {
+        setScrollFromBottom((o) => Math.min(maxScroll, o + step));
+        return;
+      }
+      if (key.pageDown || (key.ctrl && key.downArrow)) {
+        setScrollFromBottom((o) => Math.max(0, o - step));
+        return;
+      }
       if (key.ctrl && input === "a") openAskPicker(undefined, "ask");
       if (key.ctrl && input === "i") openIncoming();
       if (key.ctrl && input === "d") {
@@ -630,8 +669,6 @@ export function ChatScreen({
     },
     { isActive: inputActive && mode === "feed" },
   );
-
-  const visibleFeed = filterDialogId ? feed.filter((f) => !f.dialogId || f.dialogId === filterDialogId) : feed;
 
   if (!snap.joined) {
     return (
@@ -866,16 +903,24 @@ export function ChatScreen({
         <Text color={theme.dim}>
           {dialogs.length} threads · Ctrl+D · Ctrl+I
           {pending > 0 ? ` · ${pending} pending` : ""}
+          {olderCount > 0 || newerCount > 0
+            ? ` · PgUp/PgDn${olderCount > 0 ? ` · ↑${olderCount}` : ""}${newerCount > 0 ? ` · ↓${newerCount}` : ""}`
+            : ""}
         </Text>
       </Box>
 
-      <Box flexDirection="column" flexGrow={1} marginBottom={1}>
-        {visibleFeed.map((item) => (
+      <Box
+        flexDirection="column"
+        height={feedBudget}
+        overflowY="hidden"
+        marginBottom={1}
+      >
+        {windowedFeed.map((item) => (
           <FeedLine key={item.id} item={item} />
         ))}
       </Box>
 
-      <Box>
+      <Box flexShrink={0}>
         <Text color={theme.accent} bold>
           {target ? `/${askMode === "discuss" ? "discuss" : "ask"} ${target}> ` : "> "}
         </Text>
@@ -896,9 +941,9 @@ export function ChatScreen({
           <Text color={theme.dim}>{value}</Text>
         )}
       </Box>
-      <Box marginTop={1}>
+      <Box marginTop={1} flexShrink={0}>
         <Text color={theme.dim}>
-          Enter send · /ask · /discuss · /incoming · /local · /dialogs · /quit
+          Enter send · /ask · /discuss · /incoming · /local · /wipe · /dialogs · PgUp/PgDn
           {pending > 0 ? ` · ${pending} in flight` : ""}
         </Text>
       </Box>
