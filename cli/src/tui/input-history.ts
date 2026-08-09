@@ -15,6 +15,32 @@ export function emptyInputHistory(): InputHistoryState {
   return { entries: [], index: null, draft: "" };
 }
 
+/** Survives ChatScreen unmount when switching TUI tabs. */
+let sessionHist: InputHistoryState = emptyInputHistory();
+let sessionLiveValue = "";
+
+export function getSessionInputHistory(): InputHistoryState {
+  return sessionHist;
+}
+
+export function setSessionInputHistory(state: InputHistoryState): void {
+  sessionHist = state;
+}
+
+export function getSessionLiveValue(): string {
+  return sessionLiveValue;
+}
+
+export function setSessionLiveValue(value: string): void {
+  sessionLiveValue = value;
+}
+
+/** Test helper / full reset. */
+export function resetSessionInputHistory(): void {
+  sessionHist = emptyInputHistory();
+  sessionLiveValue = "";
+}
+
 export function pushInputHistory(
   state: InputHistoryState,
   line: string,

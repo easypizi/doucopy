@@ -50,6 +50,11 @@ function clampFeedItems(feed: ChatFeedItem[]): ChatFeedItem[] {
   return feed.map((item) => ({ ...item, text: clampFeedText(item.text, item.kind) }));
 }
 
+/** Replace persisted welcome row with the current copy (key hints change across releases). */
+export function withCurrentWelcome(feed: ChatFeedItem[], welcome: ChatFeedItem): ChatFeedItem[] {
+  return feed.map((item) => (item.id === "welcome" ? { ...welcome } : item));
+}
+
 export interface ChatDialog {
   id: string;
   peer: string;

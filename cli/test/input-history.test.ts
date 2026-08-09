@@ -1,10 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   editInputHistory,
   emptyInputHistory,
+  getSessionInputHistory,
+  getSessionLiveValue,
   pushInputHistory,
+  resetSessionInputHistory,
+  setSessionInputHistory,
+  setSessionLiveValue,
   stepInputHistory,
 } from "../src/tui/input-history.js";
+
+afterEach(() => {
+  resetSessionInputHistory();
+});
 
 describe("input-history", () => {
   it("pushes submitted lines, skips empty and consecutive dupes, caps length", () => {
@@ -62,5 +71,13 @@ describe("input-history", () => {
     const live = pushInputHistory(empty, "a");
     expect(stepInputHistory(live, "down", "x").value).toBe("x");
     expect(stepInputHistory(live, "down", "x").state.index).toBeNull();
+  });
+
+  it("module session store survives round-trip (tab remount)", () => {
+    const hist = pushInputHistory(emptyInputHistory(), "/ask");
+    setSessionInputHistory(hist);
+    setSessionLiveValue("draft-wip");
+    expect(getSessionInputHistory().entries).toEqual(["/ask"]);
+    expect(getSessionLiveValue()).toBe("draft-wip");
   });
 });

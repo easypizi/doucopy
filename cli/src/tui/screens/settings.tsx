@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { useHoldKeyCapture } from "../key-capture.js";
 import { NAME_PATTERN } from "../../join.js";
 import { RESPONDER_DAEMON_UNSUPPORTED, responderDaemonSupported, startDaemon, stopDaemon } from "../../launchd.js";
+import { clearLocalAskSessions } from "../../local-ask.js";
 import { renamePeer } from "../../rename-peer.js";
 import {
   READ_DENY_PRESETS,
@@ -201,6 +202,14 @@ export function SettingsScreen({
   latest.current = { draft, editor, filtering, dirty, restartOnSave, visible, active, cursor };
 
   const saveDraft = (current: DoucopyConfigFile, doRestart: boolean) => {
+    let prevHarness: string | undefined;
+    try {
+      prevHarness = (JSON.parse(baseline) as DoucopyConfigFile).responder?.harness;
+    } catch {
+      prevHarness = undefined;
+    }
+    const nextHarness = current.responder?.harness;
+    if (prevHarness !== nextHarness) clearLocalAskSessions();
     writeConfig(home, current);
     setBaseline(JSON.stringify(current));
     setMessage(`wrote ${home}/.doucopy/config.json`);

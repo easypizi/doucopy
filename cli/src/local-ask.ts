@@ -31,7 +31,12 @@ export interface LocalRunnerOpts {
   kind: LocalHarnessKind;
 }
 
-const sessions = new Map<string, string>();
+interface StoredLocalSession {
+  sessionId: string;
+  kind: LocalHarnessKind;
+}
+
+const sessions = new Map<string, StoredLocalSession>();
 
 export function resolveLocalHarness(config: DoucopyConfigFile): {
   kind: LocalHarnessKind;
@@ -185,21 +190,27 @@ export async function localAsk(input: LocalAskInput): Promise<LocalAskResult> {
     kind: resolved.kind,
   };
   const task = buildLocalTask(input.home, input.question, input.config);
-  const existingSession = sessions.get(conversationId);
+  const existing = sessions.get(conversationId);
+  const sameHarness = existing?.kind === resolved.kind;
   const runFirst = input.runFirst ?? defaultRunFirst;
   const runFollowup = input.runFollowup ?? defaultRunFollowup;
 
-  const result = existingSession
-    ? await runFollowup(runnerOpts, existingSession, task)
-    : await runFirst(runnerOpts, task);
+  const result =
+    existing && sameHarness
+      ? await runFollowup(runnerOpts, existing.sessionId, task)
+      : await runFirst(runnerOpts, task);
 
-  if (result.sessionId) sessions.set(conversationId, result.sessionId);
+  if (result.sessionId) {
+    sessions.set(conversationId, { sessionId: result.sessionId, kind: resolved.kind });
+  } else if (existing && !sameHarness) {
+    sessions.delete(conversationId);
+  }
 
   return {
     answer: result.answer,
     error: result.error,
     conversationId,
-    sessionId: result.sessionId ?? existingSession,
+    sessionId: result.sessionId ?? (sameHarness ? existing?.sessionId : undefined),
   };
 }
 

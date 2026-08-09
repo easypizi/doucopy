@@ -266,7 +266,9 @@ describe("summarizeHarnessStderr", () => {
 
   it("appends codex login hint on 401 Unauthorized", () => {
     const raw = "error: 401 Unauthorized, url: wss://api.openai.com/...";
-    expect(summarizeHarnessStderr(raw)).toMatch(/codex login/i);
+    const out = summarizeHarnessStderr(raw, { CODEX_HOME: "/tmp/my-codex-home" });
+    expect(out).toMatch(/codex login/i);
+    expect(out).toContain("CODEX_HOME=/tmp/my-codex-home");
   });
 });
 

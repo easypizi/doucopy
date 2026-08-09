@@ -13,6 +13,7 @@ import {
   clampFeedText,
   loadChatHistory,
   saveChatHistory,
+  withCurrentWelcome,
   withDialogPreview,
   type AskDelivery,
   type ChatDialog,
@@ -30,8 +31,11 @@ import {
 } from "../delivery-chip.js";
 import {
   editInputHistory,
-  emptyInputHistory,
+  getSessionInputHistory,
+  getSessionLiveValue,
   pushInputHistory,
+  setSessionInputHistory,
+  setSessionLiveValue,
   stepInputHistory,
   type InputHistoryState,
 } from "../input-history.js";
@@ -106,7 +110,7 @@ export function ChatScreen({
   const welcomeItem: FeedItem = {
     id: "welcome",
     kind: "system",
-    text: "Type a question and Enter — pick a peer or local. /ask · /discuss · /incoming · /local · /wipe · /dialogs · Ctrl+↑/↓ scroll · ↑/↓ history (saved across tabs/restarts).",
+    text: "Type a question and Enter — pick a peer or local. /ask · /discuss · /incoming · /local · /wipe · /dialogs · Alt+↑/↓ scroll · ↑/↓ history (saved across tabs/restarts).",
   };
 
   const [feed, setFeed] = useState<FeedItem[]>([welcomeItem]);
@@ -116,7 +120,7 @@ export function ChatScreen({
   const [askPeerName, setAskPeerName] = useState<string | null>(null);
   const [askMode, setAskMode] = useState<AskMode>("ask");
   const [mode, setMode] = useState<ScreenMode>("feed");
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(() => getSessionLiveValue());
   const [pending, setPending] = useState(0);
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [incomingFocus, setIncomingFocus] = useState<IncomingTicket | null>(null);
@@ -125,8 +129,8 @@ export function ChatScreen({
   const [scrollFromBottom, setScrollFromBottom] = useState(0);
   /** Advances while asks are in flight so live chips animate. */
   const [waitTick, setWaitTick] = useState(0);
-  /** Session-local submitted-line history for ↑/↓ (not persisted). */
-  const [inputHist, setInputHist] = useState<InputHistoryState>(() => emptyInputHistory());
+  /** Session input history (module store survives tab remounts). */
+  const [inputHist, setInputHist] = useState<InputHistoryState>(() => getSessionInputHistory());
   const dialogsRef = useRef(dialogs);
   const activeRef = useRef(activeDialogId);
   const primedRef = useRef(false);
@@ -143,18 +147,18 @@ export function ChatScreen({
     const hist = loadChatHistory(localHome);
     if (hist.feed.length > 0) {
       // Drop in-flight chips from a previous session (poll is gone).
-      setFeed(
-        hist.feed.map((item) => {
-          if (item.kind !== "ask") return item;
-          const live =
-            item.delivery === "sending" ||
-            item.delivery === "queued" ||
-            item.delivery === "answering" ||
-            item.delivery === "offline";
-          if (!live && !item.pending) return item;
-          return { ...item, pending: false, delivery: live ? undefined : item.delivery };
-        }),
-      );
+      // Refresh welcome copy so key hints match this CLI version.
+      const refreshed = withCurrentWelcome(hist.feed, welcomeItem).map((item) => {
+        if (item.kind !== "ask") return item;
+        const live =
+          item.delivery === "sending" ||
+          item.delivery === "queued" ||
+          item.delivery === "answering" ||
+          item.delivery === "offline";
+        if (!live && !item.pending) return item;
+        return { ...item, pending: false, delivery: live ? undefined : item.delivery };
+      });
+      setFeed(refreshed);
     }
     if (hist.dialogs.length > 0) setDialogs(withDialogPreview(hist.dialogs, hist.feed));
     setActiveDialogId(hist.activeDialogId);
@@ -505,11 +509,20 @@ export function ChatScreen({
     setMode("pick_incoming");
   };
 
+  const applyInputHist = (next: InputHistoryState) => {
+    setSessionInputHistory(next);
+    setInputHist(next);
+  };
+  const applyValue = (next: string) => {
+    setSessionLiveValue(next);
+    setValue(next);
+  };
+
   const handleLine = (raw: string) => {
     const line = raw.trim();
     if (!line) return;
-    setInputHist((h) => pushInputHistory(h, line));
-    setValue("");
+    applyInputHist(pushInputHistory(inputHist, line));
+    applyValue("");
 
     if (line === "/quit" || line === "/exit") {
       if (pending > 0) setMode("quit");
@@ -679,24 +692,26 @@ export function ChatScreen({
         return;
       }
       const step = Math.max(1, Math.floor(feedBudget / 2));
-      if (key.pageUp || (key.ctrl && key.upArrow)) {
+      // Alt/Option+arrows (Ink: meta). Ctrl+arrows are a macOS system shortcut.
+      const altArrow = Boolean(key.meta) && !key.ctrl;
+      if (key.pageUp || (altArrow && key.upArrow)) {
         setScrollFromBottom((o) => Math.min(maxScroll, o + step));
         return;
       }
-      if (key.pageDown || (key.ctrl && key.downArrow)) {
+      if (key.pageDown || (altArrow && key.downArrow)) {
         setScrollFromBottom((o) => Math.max(0, o - step));
         return;
       }
       if (!key.ctrl && !key.meta && key.upArrow) {
         const r = stepInputHistory(inputHist, "up", value);
-        setInputHist(r.state);
-        setValue(r.value);
+        applyInputHist(r.state);
+        applyValue(r.value);
         return;
       }
       if (!key.ctrl && !key.meta && key.downArrow) {
         const r = stepInputHistory(inputHist, "down", value);
-        setInputHist(r.state);
-        setValue(r.value);
+        applyInputHist(r.state);
+        applyValue(r.value);
         return;
       }
       if (key.ctrl && input === "a") openAskPicker(undefined, "ask");
@@ -942,7 +957,7 @@ export function ChatScreen({
           {dialogs.length} threads · Ctrl+D · Ctrl+I
           {pending > 0 ? ` · ${pending} pending` : ""}
           {olderCount > 0 || newerCount > 0
-            ? ` · Ctrl+↑/↓${olderCount > 0 ? ` · ↑${olderCount}` : ""}${newerCount > 0 ? ` · ↓${newerCount}` : ""}`
+            ? ` · Alt+↑/↓${olderCount > 0 ? ` · ↑${olderCount}` : ""}${newerCount > 0 ? ` · ↓${newerCount}` : ""}`
             : ""}
         </Text>
       </Box>
@@ -968,8 +983,8 @@ export function ChatScreen({
                 : "Type a question · Enter · pick peer from list"
             }
             onChange={(next) => {
-              setInputHist((h) => editInputHistory(h, next));
-              setValue(next);
+              applyInputHist(editInputHistory(inputHist, next));
+              applyValue(next);
             }}
             onSubmit={handleLine}
           />
@@ -979,7 +994,7 @@ export function ChatScreen({
       </Box>
       <Box marginTop={1} flexShrink={0}>
         <Text color={theme.dim}>
-          Enter send · /ask · /discuss · /incoming · /local · /wipe · /dialogs · Ctrl+↑/↓ scroll · ↑/↓ history
+          Enter send · /ask · /discuss · /incoming · /local · /wipe · /dialogs · Alt+↑/↓ scroll · ↑/↓ history
           {pending > 0 ? ` · ${pending} in flight` : ""}
         </Text>
       </Box>

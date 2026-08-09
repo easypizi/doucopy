@@ -7,6 +7,7 @@ import {
   clampFeedText,
   loadChatHistory,
   saveChatHistory,
+  withCurrentWelcome,
   withDialogPreview,
 } from "../src/chat-history.js";
 
@@ -100,5 +101,21 @@ describe("chat-history", () => {
       ],
     );
     expect(dialogs[0]!.lastPreview).toMatch(/what about the launch/);
+  });
+
+  it("withCurrentWelcome replaces stale welcome copy by id", () => {
+    const welcome = {
+      id: "welcome",
+      kind: "system" as const,
+      text: "new hints Alt+↑/↓ scroll · ↑/↓ history",
+    };
+    const feed = [
+      { id: "welcome", kind: "system" as const, text: "old PgUp/PgDn to scroll" },
+      { id: "a1", kind: "ask" as const, peer: "x", text: "hi" },
+    ];
+    const next = withCurrentWelcome(feed, welcome);
+    expect(next[0]!.text).toContain("Alt+↑/↓");
+    expect(next[0]!.text).not.toContain("PgUp");
+    expect(next[1]!.text).toBe("hi");
   });
 });

@@ -53,8 +53,18 @@ interface SpawnRunResult {
   error?: string;
 }
 
+/** Real user Codex home (auth/keychain). Never invent a per-workspace fake home. */
+export function resolveUserCodexHome(env: NodeJS.ProcessEnv = process.env): string {
+  const fromEnv = env.CODEX_HOME?.trim();
+  if (fromEnv) return fromEnv;
+  return path.join(homedir(), ".codex");
+}
+
 /** Prefer a short actionable line over Codex session banners in stderr. */
-export function summarizeHarnessStderr(stderr: string): string {
+export function summarizeHarnessStderr(
+  stderr: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
   const text = stderr.replace(/\s+/gu, " ").trim();
   if (!text) return "";
   const errorMatch = text.match(/\bError:\s*[^.]{1,200}/i)
@@ -66,17 +76,11 @@ export function summarizeHarnessStderr(stderr: string): string {
   if (!detail) detail = text.slice(0, 500);
   if (/401|unauthorized/i.test(detail) || /401|unauthorized/i.test(text)) {
     if (!/codex login/i.test(detail)) {
-      detail = `${detail} — codex auth missing for this CODEX_HOME; run: codex login`;
+      const codexHome = resolveUserCodexHome(env);
+      detail = `${detail} — codex auth missing for CODEX_HOME=${codexHome}; run: codex login`;
     }
   }
   return detail.slice(0, 500);
-}
-
-/** Real user Codex home (auth/keychain). Never invent a per-workspace fake home. */
-export function resolveUserCodexHome(env: NodeJS.ProcessEnv = process.env): string {
-  const fromEnv = env.CODEX_HOME?.trim();
-  if (fromEnv) return fromEnv;
-  return path.join(homedir(), ".codex");
 }
 
 // Generic "run to completion, capture stdout, kill on timeout" driver used by

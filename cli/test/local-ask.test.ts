@@ -62,4 +62,40 @@ describe("localAsk", () => {
     expect(r.error).toMatch(/not found/);
     expect(r.answer).toBeUndefined();
   });
+
+  it("starts a new first turn when harness kind changes mid-conversation", async () => {
+    const home = mkdtempSync(path.join(tmpdir(), "doucopy-local-switch-"));
+    const calls: string[] = [];
+    const first = await localAsk({
+      home,
+      question: "via-claude",
+      config: { responder: { harness: "claude", binary: "claude" } },
+      runFirst: async () => {
+        calls.push("first-claude");
+        return { conversationId: "", answer: "a", sessionId: "claude-sess" };
+      },
+      runFollowup: async () => {
+        calls.push("follow-claude");
+        return { conversationId: "", answer: "nope", sessionId: "claude-sess" };
+      },
+    });
+
+    const second = await localAsk({
+      home,
+      question: "via-codex",
+      conversationId: first.conversationId,
+      config: { responder: { harness: "codex", binary: "codex" } },
+      runFirst: async () => {
+        calls.push("first-codex");
+        return { conversationId: "", answer: "b", sessionId: "codex-sess" };
+      },
+      runFollowup: async () => {
+        calls.push("follow-codex");
+        return { conversationId: "", answer: "nope", sessionId: "x" };
+      },
+    });
+
+    expect(second.answer).toBe("b");
+    expect(calls).toEqual(["first-claude", "first-codex"]);
+  });
 });
