@@ -250,32 +250,85 @@ export async function loginHarness(
   return { ok: result.code === 0, stdout: result.stdout, stderr: result.stderr };
 }
 
+export type LoginInheritOpts = {
+  spawnSyncFn?: typeof spawnSync;
+  platform?: NodeJS.Platform;
+  pathEnv?: string;
+  /** Override default 5-minute login timeout. */
+  timeoutMs?: number;
+};
+
+/**
+ * Pick the first login binary that exists on PATH (agent → cursor-agent, etc.).
+ * Avoids spawning a missing command (on Windows that can open an empty console).
+ */
+export function resolveLoginInvocation(
+  id: HarnessId,
+  opts: { platform?: NodeJS.Platform; pathEnv?: string } = {},
+): { command: string; args: string[]; shell: boolean } | { error: string } {
+  const platform = opts.platform ?? process.platform;
+  const pathEnv = opts.pathEnv ?? process.env.PATH;
+  const spec = loginCommand(id);
+  const candidates = [
+    { command: spec.command, args: spec.args ?? [] },
+    ...(spec.fallback ? [{ command: spec.fallback.command, args: spec.fallback.args ?? [] }] : []),
+  ];
+  for (const c of candidates) {
+    if (binaryOnPath(c.command, { platform, pathEnv })) {
+      // Windows npm/Cursor shims are .cmd; Node needs shell:true to run them.
+      return { ...c, shell: platform === "win32" || Boolean(spec.shell) };
+    }
+  }
+  const names = candidates.map((c) => c.command).join(" / ");
+  return {
+    error:
+      `${names} not found on PATH. Install the ${id} CLI, open a new terminal, then run: ` +
+      `${candidates[0]!.command} ${(candidates[0]!.args ?? []).join(" ")}`.trim(),
+  };
+}
+
 /**
  * Run harness login with inherited stdio (interactive TUI of agent CLI).
  * Must not be called while Ink alternate-screen is active.
  */
 export function loginWithInherit(
   id: HarnessId,
-  opts: { spawnSyncFn?: typeof spawnSync } = {},
+  opts: LoginInheritOpts = {},
 ): { ok: boolean; status: number | null; stdout: string; stderr: string } {
-  const spawnFn = opts.spawnSyncFn ?? spawnSync;
-  const spec = loginCommand(id);
-  const tryOne = (command: string, args: string[] = []) =>
-    spawnFn(command, args, {
-      encoding: "utf8",
-      shell: Boolean(spec.shell),
-      stdio: "inherit",
-      env: process.env,
-    });
-  let out = tryOne(spec.command, spec.args ?? []);
-  if ((out.error || out.status === 127) && spec.fallback) {
-    out = tryOne(spec.fallback.command, spec.fallback.args ?? []);
+  const platform = opts.platform ?? process.platform;
+  refreshPathAfterInstall(platform);
+  const resolved = resolveLoginInvocation(id, {
+    platform,
+    pathEnv: opts.pathEnv ?? process.env.PATH,
+  });
+  if ("error" in resolved) {
+    return { ok: false, status: 127, stdout: "", stderr: resolved.error };
   }
+
+  const spawnFn = opts.spawnSyncFn ?? spawnSync;
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_LOGIN_TIMEOUT_MS;
+  const out = spawnFn(resolved.command, resolved.args, {
+    encoding: "utf8",
+    shell: resolved.shell,
+    stdio: "inherit",
+    env: process.env,
+    timeout: timeoutMs,
+    // Keep login in this console on Windows (avoid a second blank conhost).
+    windowsHide: false,
+  });
+  const stderr =
+    typeof out.stderr === "string" && out.stderr
+      ? out.stderr
+      : out.error?.message
+        ? out.error.message
+        : out.signal === "SIGTERM"
+          ? `login timed out after ${Math.round(timeoutMs / 1000)}s`
+          : "";
   return {
     ok: out.status === 0,
     status: out.status,
     stdout: typeof out.stdout === "string" ? out.stdout : "",
-    stderr: typeof out.stderr === "string" ? out.stderr : out.error?.message ?? "",
+    stderr,
   };
 }
 

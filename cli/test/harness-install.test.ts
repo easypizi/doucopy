@@ -128,21 +128,47 @@ describe("installMissingHarnesses / loginWithInherit", () => {
     expect(needLogin.sort()).toEqual(["claude", "cursor"]);
   });
 
-  it("loginWithInherit uses stdio inherit and fallback", () => {
-    const calls: Array<{ command: string; stdio: unknown }> = [];
-    const spawnSyncFn = ((command: string, _args?: string[], opts?: { stdio?: unknown }) => {
-      calls.push({ command, stdio: opts?.stdio });
-      if (command === "agent") {
-        return { status: 127, error: new Error("missing"), stdout: "", stderr: "" };
-      }
+  it("loginWithInherit does not spawn when no harness binary is on PATH", () => {
+    const calls: string[] = [];
+    const spawnSyncFn = ((command: string) => {
+      calls.push(command);
       return { status: 0, stdout: "", stderr: "" };
     }) as typeof import("node:child_process").spawnSync;
 
-    const result = loginWithInherit("cursor", { spawnSyncFn });
+    const missing = loginWithInherit("cursor", {
+      spawnSyncFn,
+      platform: "darwin",
+      pathEnv: "",
+    });
+    expect(missing.ok).toBe(false);
+    expect(missing.stderr).toMatch(/not found on PATH/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("loginWithInherit on win32 uses shell for .cmd shims when binary is present", async () => {
+    const { mkdtempSync, writeFileSync, mkdirSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const path = await import("node:path");
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-agent-"));
+    mkdirSync(dir, { recursive: true });
+    // binaryOnPath on win32 also checks .cmd
+    writeFileSync(path.join(dir, "agent.cmd"), "@echo off\n");
+    const calls: Array<{ command: string; shell?: boolean; stdio?: unknown }> = [];
+    const spawnSyncFn = ((command: string, _args?: string[], opts?: { shell?: boolean; stdio?: unknown }) => {
+      calls.push({ command, shell: opts?.shell, stdio: opts?.stdio });
+      return { status: 0, stdout: "", stderr: "" };
+    }) as typeof import("node:child_process").spawnSync;
+
+    const result = loginWithInherit("cursor", {
+      spawnSyncFn,
+      platform: "win32",
+      pathEnv: dir,
+    });
     expect(result.ok).toBe(true);
-    expect(calls[0]).toEqual({ command: "agent", stdio: "inherit" });
-    expect(calls[1]?.command).toBe("cursor-agent");
-    expect(calls[1]?.stdio).toBe("inherit");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.command).toBe("agent");
+    expect(calls[0]?.shell).toBe(true);
+    expect(calls[0]?.stdio).toBe("inherit");
   });
 });
 

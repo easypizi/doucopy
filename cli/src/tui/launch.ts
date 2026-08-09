@@ -15,12 +15,22 @@ async function runPendingLogins(home: string): Promise<boolean> {
   const resume = readSetupResume(home);
   if (!resume || resume.pendingLogins.length === 0) return false;
 
-  console.log("\ndoucopy: Setup paused for harness login (opens in this terminal).\n");
+  console.log("\ndoucopy: Setup paused for harness login.");
+  console.log("A browser or CLI prompt should appear in THIS window.");
+  console.log("If nothing happens for ~30s, press Ctrl+C and run the login command manually.\n");
   for (const id of resume.pendingLogins) {
-    console.log(`Logging in to ${id}…`);
+    console.log(`── Logging in to ${id} ──`);
     const result = loginWithInherit(id);
     if (!result.ok) {
       console.log(`Login for ${id} did not complete${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
+      if (id === "cursor") {
+        console.log("Manual fix: install Cursor Agent, then run:  agent login");
+        console.log("             (or: cursor-agent login)");
+      } else if (id === "claude") {
+        console.log("Manual fix: npm i -g @anthropic-ai/claude-code && claude auth login");
+      } else {
+        console.log("Manual fix: npm i -g @openai/codex && codex login");
+      }
     } else {
       const probe = await probeHarness(id as HarnessId);
       console.log(
@@ -29,6 +39,7 @@ async function runPendingLogins(home: string): Promise<boolean> {
           : `Login finished for ${id} (re-check auth if needed)`,
       );
     }
+    console.log("");
   }
 
   writeSetupResume(home, {
@@ -36,7 +47,7 @@ async function runPendingLogins(home: string): Promise<boolean> {
     pendingLogins: [],
     resumePhase: "askers",
   });
-  console.log("\ndoucopy: Resuming Setup…\n");
+  console.log("doucopy: Resuming Setup…\n");
   return true;
 }
 
