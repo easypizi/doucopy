@@ -28,6 +28,13 @@ import {
   formatLiveDeliveryChip,
   isLiveDelivery,
 } from "../delivery-chip.js";
+import {
+  editInputHistory,
+  emptyInputHistory,
+  pushInputHistory,
+  stepInputHistory,
+  type InputHistoryState,
+} from "../input-history.js";
 import { useHoldKeyCapture } from "../key-capture.js";
 import { theme } from "../theme.js";
 import type { StatusSnapshot } from "../useStatusSnapshot.js";
@@ -99,7 +106,7 @@ export function ChatScreen({
   const welcomeItem: FeedItem = {
     id: "welcome",
     kind: "system",
-    text: "Type a question and Enter — pick a peer or local. /ask · /discuss · /incoming · /local · /wipe · /dialogs · PgUp/PgDn to scroll (saved across tabs/restarts).",
+    text: "Type a question and Enter — pick a peer or local. /ask · /discuss · /incoming · /local · /wipe · /dialogs · Ctrl+↑/↓ scroll · ↑/↓ history (saved across tabs/restarts).",
   };
 
   const [feed, setFeed] = useState<FeedItem[]>([welcomeItem]);
@@ -118,6 +125,8 @@ export function ChatScreen({
   const [scrollFromBottom, setScrollFromBottom] = useState(0);
   /** Advances while asks are in flight so live chips animate. */
   const [waitTick, setWaitTick] = useState(0);
+  /** Session-local submitted-line history for ↑/↓ (not persisted). */
+  const [inputHist, setInputHist] = useState<InputHistoryState>(() => emptyInputHistory());
   const dialogsRef = useRef(dialogs);
   const activeRef = useRef(activeDialogId);
   const primedRef = useRef(false);
@@ -499,6 +508,7 @@ export function ChatScreen({
   const handleLine = (raw: string) => {
     const line = raw.trim();
     if (!line) return;
+    setInputHist((h) => pushInputHistory(h, line));
     setValue("");
 
     if (line === "/quit" || line === "/exit") {
@@ -675,6 +685,18 @@ export function ChatScreen({
       }
       if (key.pageDown || (key.ctrl && key.downArrow)) {
         setScrollFromBottom((o) => Math.max(0, o - step));
+        return;
+      }
+      if (!key.ctrl && !key.meta && key.upArrow) {
+        const r = stepInputHistory(inputHist, "up", value);
+        setInputHist(r.state);
+        setValue(r.value);
+        return;
+      }
+      if (!key.ctrl && !key.meta && key.downArrow) {
+        const r = stepInputHistory(inputHist, "down", value);
+        setInputHist(r.state);
+        setValue(r.value);
         return;
       }
       if (key.ctrl && input === "a") openAskPicker(undefined, "ask");
@@ -920,7 +942,7 @@ export function ChatScreen({
           {dialogs.length} threads · Ctrl+D · Ctrl+I
           {pending > 0 ? ` · ${pending} pending` : ""}
           {olderCount > 0 || newerCount > 0
-            ? ` · PgUp/PgDn${olderCount > 0 ? ` · ↑${olderCount}` : ""}${newerCount > 0 ? ` · ↓${newerCount}` : ""}`
+            ? ` · Ctrl+↑/↓${olderCount > 0 ? ` · ↑${olderCount}` : ""}${newerCount > 0 ? ` · ↓${newerCount}` : ""}`
             : ""}
         </Text>
       </Box>
@@ -945,7 +967,10 @@ export function ChatScreen({
                   : `Question for ${targetLabel}… (Enter sends)`
                 : "Type a question · Enter · pick peer from list"
             }
-            onChange={setValue}
+            onChange={(next) => {
+              setInputHist((h) => editInputHistory(h, next));
+              setValue(next);
+            }}
             onSubmit={handleLine}
           />
         ) : (
@@ -954,7 +979,7 @@ export function ChatScreen({
       </Box>
       <Box marginTop={1} flexShrink={0}>
         <Text color={theme.dim}>
-          Enter send · /ask · /discuss · /incoming · /local · /wipe · /dialogs · PgUp/PgDn
+          Enter send · /ask · /discuss · /incoming · /local · /wipe · /dialogs · Ctrl+↑/↓ scroll · ↑/↓ history
           {pending > 0 ? ` · ${pending} in flight` : ""}
         </Text>
       </Box>
