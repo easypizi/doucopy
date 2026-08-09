@@ -12,6 +12,24 @@ const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 60_000;
 const AUTH_BACKOFF_CAP_MS = 300_000;
 const DEFAULT_MAX_CONCURRENT = 3;
+/** Inbox long-poll is wait=25s; add headroom so hung TCP/TLS cannot stall forever. */
+const INBOX_WAIT_SECONDS = 25;
+const INBOX_FETCH_TIMEOUT_MS = (INBOX_WAIT_SECONDS + 15) * 1000;
+
+function mergeAbortSignals(a?: AbortSignal, b?: AbortSignal): AbortSignal | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  if (typeof AbortSignal.any === "function") return AbortSignal.any([a, b]);
+  const controller = new AbortController();
+  const forward = () => controller.abort();
+  if (a.aborted || b.aborted) {
+    controller.abort();
+    return controller.signal;
+  }
+  a.addEventListener("abort", forward, { once: true });
+  b.addEventListener("abort", forward, { once: true });
+  return controller.signal;
+}
 
 export class Poller {
   private backoffMs = INITIAL_BACKOFF_MS;
@@ -39,9 +57,10 @@ export class Poller {
     const headers = { authorization: `Bearer ${this.config.token}` };
     let res: Response;
     try {
+      const timeout = AbortSignal.timeout(INBOX_FETCH_TIMEOUT_MS);
       res = await this.fetchImpl(
-        `${this.config.relay_url}/inbox/${this.config.self_peer}?wait=25`,
-        { headers, signal },
+        `${this.config.relay_url}/inbox/${encodeURIComponent(this.config.self_peer)}?wait=${INBOX_WAIT_SECONDS}`,
+        { headers, signal: mergeAbortSignals(signal, timeout) },
       );
     } catch {
       if (signal?.aborted) return "retry";

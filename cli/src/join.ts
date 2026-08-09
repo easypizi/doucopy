@@ -6,6 +6,7 @@ import { parseArgs } from "node:util";
 import { fetchStatus, joinRelay, normalizeRelayUrl } from "./api.js";
 import { pushHistory } from "./field-history.js";
 import { installDaemon, responderDaemonSupported } from "./launchd.js";
+import { responderLogSnippet } from "./log-tail.js";
 import { areAllSkillsInstalled, installGlobalSkills, type SkillsClient } from "./skills.js";
 import {
   applyRestrictions,
@@ -607,7 +608,10 @@ export async function finalizeJoin(home: string, input: JoinFinalizeInput): Prom
     return { ok: false, messages, errors };
   }
 
-  for (let i = 0; i < 15; i += 1) {
+  // Windows Task Scheduler + cold Node start can exceed 30s before the first
+  // inbox poll marks the peer online. Wait up to ~90s.
+  const onlineWaitAttempts = 45;
+  for (let i = 0; i < onlineWaitAttempts; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 2000));
     try {
       const status = await fetchStatus(input.relayUrl, input.token);
@@ -622,7 +626,14 @@ export async function finalizeJoin(home: string, input: JoinFinalizeInput): Prom
       // relay may briefly reject while the daemon warms up, keep waiting
     }
   }
-  errors.push("daemon did not come online within 30s, check: doucopy logs");
+  errors.push("daemon did not come online within ~90s");
+  const snippet = responderLogSnippet(home);
+  if (snippet) {
+    errors.push(`recent logs:\n${snippet}`);
+  } else {
+    errors.push('no responder logs yet — run "doucopy logs" or open %USERPROFILE%\\.doucopy\\responder.err.log');
+  }
+  errors.push('try: doucopy restart, then doucopy status (self should be online)');
   return { ok: false, messages, errors };
 }
 

@@ -202,7 +202,8 @@ describe("Poller", () => {
     controller.abort(new Error("stopped"));
 
     await expect(runPromise).resolves.toBeUndefined();
-    expect(signals).toEqual([controller.signal]);
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.aborted).toBe(true);
   });
 
   it("handles up to max_concurrent questions in parallel and then blocks", async () => {
