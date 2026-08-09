@@ -25,6 +25,8 @@ export interface ChatFeedItem {
   /** Live ticket phase for ask rows (updated in place while polling). */
   delivery?: AskDelivery;
   mode?: "ask" | "discuss";
+  /** Epoch ms when the ask started (for live elapsed chip). */
+  startedAt?: number;
 }
 
 /**

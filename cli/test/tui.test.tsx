@@ -302,7 +302,9 @@ describe("Chat pending poll", () => {
     );
     cleanups.push(unmount);
     await new Promise((r) => setTimeout(r, 200));
-    expect(lastFrame() ?? "").toMatch(/● answering/);
+    expect(lastFrame() ?? "").toMatch(/[●◐○◑] answering/);
+    await new Promise((r) => setTimeout(r, 1100));
+    expect(lastFrame() ?? "").toMatch(/[●◐○◑] answering \d+s/);
     resolveReply?.({ status: "answered", ticket_id: "ticket-slow-1", answer: "ok" });
     await new Promise((r) => setTimeout(r, 200));
   });

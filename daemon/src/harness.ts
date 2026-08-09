@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { chmodSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { v7 as uuidv7 } from "uuid";
 import type { CodexSandbox } from "./permissions.js";
@@ -58,11 +59,24 @@ export function summarizeHarnessStderr(stderr: string): string {
   if (!text) return "";
   const errorMatch = text.match(/\bError:\s*[^.]{1,200}/i)
     ?? text.match(/\berror:\s*[^.]{1,200}/i);
-  if (errorMatch) return errorMatch[0]!.trim();
-  if (/Reading additional input from stdin/i.test(text)) {
-    return "stdin hang (codex waited for piped input). doucopy closes stdin after spawn.";
+  let detail = errorMatch?.[0]?.trim() ?? "";
+  if (!detail && /Reading additional input from stdin/i.test(text)) {
+    detail = "stdin hang (codex waited for piped input). doucopy closes stdin after spawn.";
   }
-  return text.slice(0, 500);
+  if (!detail) detail = text.slice(0, 500);
+  if (/401|unauthorized/i.test(detail) || /401|unauthorized/i.test(text)) {
+    if (!/codex login/i.test(detail)) {
+      detail = `${detail} — codex auth missing for this CODEX_HOME; run: codex login`;
+    }
+  }
+  return detail.slice(0, 500);
+}
+
+/** Real user Codex home (auth/keychain). Never invent a per-workspace fake home. */
+export function resolveUserCodexHome(env: NodeJS.ProcessEnv = process.env): string {
+  const fromEnv = env.CODEX_HOME?.trim();
+  if (fromEnv) return fromEnv;
+  return path.join(homedir(), ".codex");
 }
 
 // Generic "run to completion, capture stdout, kill on timeout" driver used by
@@ -193,14 +207,14 @@ class ClaudeHarness implements Harness {
 
 // Codex has no "create empty session" call. The first turn is a plain
 // `codex exec`; the session id appears afterwards in $CODEX_HOME/sessions
-// as the last component of the rollout filename. We isolate CODEX_HOME per
-// workspace so parallel dialogs don't clobber each other.
+// as the last component of the rollout filename.
+//
+// We MUST use the real user CODEX_HOME (~/.codex). Auth (auth.json / OS
+// keychain) is bound to that path. A per-workspace fake home causes 401
+// even when `codex` interactive login works. Parallel dialogs are separated
+// by picking rollouts with mtime >= run start instead of isolating homes.
 class CodexHarness implements Harness {
   readonly kind: HarnessKind = "codex";
-
-  private codexHome(workspaceDir: string): string {
-    return path.join(workspaceDir, ".codex-home");
-  }
 
   private sandbox(opts: HarnessOptions): CodexSandbox {
     return opts.codexSandbox ?? "workspace-write";
@@ -208,8 +222,9 @@ class CodexHarness implements Harness {
 
   async runFirstTask(opts: HarnessOptions, task: string): Promise<HarnessResult> {
     writeTaskFile(opts.workspaceDir, task);
-    const codexHome = this.codexHome(opts.workspaceDir);
+    const codexHome = resolveUserCodexHome();
     mkdirSync(codexHome, { recursive: true });
+    const runStartedAt = Date.now();
     const args = [
       "exec",
       "--skip-git-repo-check",
@@ -227,7 +242,7 @@ class CodexHarness implements Harness {
       labelForError: "codex",
     });
     if (result.error !== undefined || result.answer === undefined) return result;
-    const sessionId = findLatestCodexSessionId(codexHome);
+    const sessionId = findLatestCodexSessionId(codexHome, { minMtimeMs: runStartedAt - 2000 });
     if (!sessionId) {
       return { error: "codex failed: could not locate session rollout in CODEX_HOME" };
     }
@@ -236,7 +251,7 @@ class CodexHarness implements Harness {
 
   runFollowupTask(opts: HarnessOptions, sessionId: string, task: string): Promise<HarnessResult> {
     writeTaskFile(opts.workspaceDir, task);
-    const codexHome = this.codexHome(opts.workspaceDir);
+    const codexHome = resolveUserCodexHome();
     mkdirSync(codexHome, { recursive: true });
     // `codex exec resume` rejects `--sandbox` even before the subcommand:
     // that flag is not global (only plain `codex exec` accepts it). Use the
@@ -264,11 +279,20 @@ class CodexHarness implements Harness {
 
 const CODEX_ROLLOUT_RE = /rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
 
+export interface FindLatestCodexSessionOptions {
+  /** Ignore rollouts older than this (ms since epoch). Filters parallel dialogs. */
+  minMtimeMs?: number;
+}
+
 // Walk $CODEX_HOME/sessions recursively, pick the newest rollout-*.jsonl by
 // mtime, extract the trailing uuid. Codex organises sessions under date-based
 // subdirectories so we cannot glob a single level.
-export function findLatestCodexSessionId(codexHome: string): string | null {
+export function findLatestCodexSessionId(
+  codexHome: string,
+  opts: FindLatestCodexSessionOptions = {},
+): string | null {
   const root = path.join(codexHome, "sessions");
+  const minMtimeMs = opts.minMtimeMs ?? 0;
   const state: { best: { mtimeMs: number; id: string } | null } = { best: null };
   const walk = (dir: string) => {
     let entries: import("node:fs").Dirent[];
@@ -288,6 +312,7 @@ export function findLatestCodexSessionId(codexHome: string): string | null {
       if (!match) continue;
       let mtimeMs = 0;
       try { mtimeMs = statSync(full).mtimeMs; } catch { continue; }
+      if (mtimeMs < minMtimeMs) continue;
       if (!state.best || mtimeMs > state.best.mtimeMs) {
         state.best = { mtimeMs, id: match[1] };
       }

@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createHarness, findLatestCodexSessionId, summarizeHarnessStderr } from "../src/harness.js";
+import {
+  createHarness,
+  findLatestCodexSessionId,
+  resolveUserCodexHome,
+  summarizeHarnessStderr,
+} from "../src/harness.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLAUDE_FIXTURE = path.resolve(HERE, "fixtures/fake-claude.sh");
@@ -12,6 +17,7 @@ const CODEX_FIXTURE = path.resolve(HERE, "fixtures/fake-codex.sh");
 const SAVED_ENV = [
   "FAKE_CLAUDE_LOG", "FAKE_CLAUDE_MODE", "FAKE_CLAUDE_ANSWER",
   "FAKE_CODEX_LOG", "FAKE_CODEX_MODE", "FAKE_CODEX_ANSWER", "FAKE_CODEX_SESSION_ID",
+  "CODEX_HOME",
 ] as const;
 let backup: Record<string, string | undefined> = {};
 
@@ -123,11 +129,13 @@ describe("ClaudeHarness", () => {
 });
 
 describe("CodexHarness", () => {
-  it("runFirstTask uses plain `codex exec`, isolated CODEX_HOME, scrapes session id from rollout", async () => {
+  it("runFirstTask uses plain `codex exec`, real CODEX_HOME, scrapes session id from rollout", async () => {
     const harness = createHarness("codex");
     const dir = mkdtempSync(path.join(tmpdir(), "doucopy-codex-"));
     const workspace = path.join(dir, "workspace");
+    const codexHome = path.join(dir, "real-codex-home");
     const logFile = path.join(dir, "args.log");
+    process.env.CODEX_HOME = codexHome;
     process.env.FAKE_CODEX_LOG = logFile;
     process.env.FAKE_CODEX_ANSWER = "codex-answer";
     process.env.FAKE_CODEX_SESSION_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
@@ -142,14 +150,15 @@ describe("CodexHarness", () => {
     expect(invocation[0]).toBe("exec");
     expect(invocation).not.toContain("resume");
     expect(invocation).toContain("workspace-write");
-    expect(log).toContain(`CODEX_HOME=${path.join(workspace, ".codex-home")}`);
-    // The rollout file that we scraped from should really exist under CODEX_HOME.
-    expect(existsSync(path.join(workspace, ".codex-home", "sessions"))).toBe(true);
+    expect(log).toContain(`CODEX_HOME=${codexHome}`);
+    expect(log).not.toContain(".codex-home");
+    expect(existsSync(path.join(codexHome, "sessions"))).toBe(true);
   });
 
   it("runFirstTask returns an error when no rollout gets written", async () => {
     const harness = createHarness("codex");
     const dir = mkdtempSync(path.join(tmpdir(), "doucopy-codex-"));
+    process.env.CODEX_HOME = path.join(dir, "real-codex-home");
     process.env.FAKE_CODEX_ANSWER = "answer-without-rollout";
     // Force the stub to skip its rollout-writing branch by pretending it was
     // called as a resume (which never writes rollout in the fake).
@@ -167,7 +176,9 @@ describe("CodexHarness", () => {
     const harness = createHarness("codex");
     const dir = mkdtempSync(path.join(tmpdir(), "doucopy-codex-"));
     const workspace = path.join(dir, "workspace");
+    const codexHome = path.join(dir, "real-codex-home");
     const logFile = path.join(dir, "args.log");
+    process.env.CODEX_HOME = codexHome;
     process.env.FAKE_CODEX_LOG = logFile;
     process.env.FAKE_CODEX_ANSWER = "followup";
     const result = await harness.runFollowupTask(
@@ -188,13 +199,14 @@ describe("CodexHarness", () => {
     expect(cIdx).toBeGreaterThan(0);
     expect(cIdx).toBeLessThan(resumeIdx);
     expect(invocation[cIdx + 1]).toBe('sandbox_mode="workspace-write"');
-    expect(log).toContain(`CODEX_HOME=${path.join(workspace, ".codex-home")}`);
+    expect(log).toContain(`CODEX_HOME=${codexHome}`);
   });
 
   it("honours codexSandbox override", async () => {
     const harness = createHarness("codex");
     const dir = mkdtempSync(path.join(tmpdir(), "doucopy-codex-"));
     const workspace = path.join(dir, "workspace");
+    process.env.CODEX_HOME = path.join(dir, "real-codex-home");
     const logFile = path.join(dir, "args.log");
     process.env.FAKE_CODEX_LOG = logFile;
     process.env.FAKE_CODEX_ANSWER = "x";
@@ -212,6 +224,7 @@ describe("CodexHarness", () => {
     const harness = createHarness("codex");
     const dir = mkdtempSync(path.join(tmpdir(), "doucopy-codex-"));
     const workspace = path.join(dir, "workspace");
+    process.env.CODEX_HOME = path.join(dir, "real-codex-home");
     const logFile = path.join(dir, "args.log");
     process.env.FAKE_CODEX_LOG = logFile;
     process.env.FAKE_CODEX_ANSWER = "followup";
@@ -250,6 +263,17 @@ describe("summarizeHarnessStderr", () => {
     const raw = "Reading additional input from stdin...\nOpenAI Codex v0.142.0\nworkdir: /tmp";
     expect(summarizeHarnessStderr(raw)).toMatch(/stdin hang/i);
   });
+
+  it("appends codex login hint on 401 Unauthorized", () => {
+    const raw = "error: 401 Unauthorized, url: wss://api.openai.com/...";
+    expect(summarizeHarnessStderr(raw)).toMatch(/codex login/i);
+  });
+});
+
+describe("resolveUserCodexHome", () => {
+  it("prefers CODEX_HOME env over ~/.codex", () => {
+    expect(resolveUserCodexHome({ CODEX_HOME: "/tmp/custom-codex" })).toBe("/tmp/custom-codex");
+  });
 });
 
 describe("findLatestCodexSessionId", () => {
@@ -273,5 +297,24 @@ describe("findLatestCodexSessionId", () => {
     utimesSync(older, now - 1000, now - 1000);
     utimesSync(newer, now, now);
     expect(findLatestCodexSessionId(dir)).toBe(newerId);
+  });
+
+  it("honours minMtimeMs so older parallel rollouts are ignored", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-codex-scan-"));
+    const { mkdirSync, writeFileSync, utimesSync } = await import("node:fs");
+    const olderId = "11111111-1111-1111-1111-111111111111";
+    const newerId = "22222222-2222-2222-2222-222222222222";
+    const older = path.join(dir, "sessions/2026/07/26", `rollout-2026-07-26T10-00-00-${olderId}.jsonl`);
+    const newer = path.join(dir, "sessions/2026/07/27", `rollout-2026-07-27T10-00-00-${newerId}.jsonl`);
+    mkdirSync(path.dirname(older), { recursive: true });
+    mkdirSync(path.dirname(newer), { recursive: true });
+    writeFileSync(older, "{}");
+    writeFileSync(newer, "{}");
+    const now = Date.now() / 1000;
+    utimesSync(older, now - 1000, now - 1000);
+    utimesSync(newer, now, now);
+    const floor = (now - 10) * 1000;
+    expect(findLatestCodexSessionId(dir, { minMtimeMs: floor })).toBe(newerId);
+    expect(findLatestCodexSessionId(dir, { minMtimeMs: (now + 100) * 1000 })).toBeNull();
   });
 });

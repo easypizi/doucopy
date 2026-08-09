@@ -22,7 +22,12 @@ import { localAsk, resolveLocalHarness } from "../../local-ask.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { SelectModal } from "../components/SelectModal.js";
 import { TextPrompt } from "../components/TextPrompt.js";
-import { DELIVERY_CHIP, deliveryFromPhase, formatDeliveryChip } from "../delivery-chip.js";
+import {
+  DELIVERY_CHIP,
+  deliveryFromPhase,
+  formatLiveDeliveryChip,
+  isLiveDelivery,
+} from "../delivery-chip.js";
 import { useHoldKeyCapture } from "../key-capture.js";
 import { theme } from "../theme.js";
 import type { StatusSnapshot } from "../useStatusSnapshot.js";
@@ -111,6 +116,8 @@ export function ChatScreen({
   const [hydrated, setHydrated] = useState(false);
   /** Items hidden below the viewport (0 = pinned to newest). */
   const [scrollFromBottom, setScrollFromBottom] = useState(0);
+  /** Advances while asks are in flight so live chips animate. */
+  const [waitTick, setWaitTick] = useState(0);
   const dialogsRef = useRef(dialogs);
   const activeRef = useRef(activeDialogId);
   const primedRef = useRef(false);
@@ -182,6 +189,12 @@ export function ChatScreen({
   useEffect(() => {
     onBusyChange?.(pending > 0);
   }, [pending, onBusyChange]);
+
+  useEffect(() => {
+    if (pending <= 0) return;
+    const id = setInterval(() => setWaitTick((t) => t + 1), 500);
+    return () => clearInterval(id);
+  }, [pending]);
 
   useEffect(() => {
     if (!localHome || !hydrated) return;
@@ -354,6 +367,7 @@ export function ChatScreen({
       pending: true,
       delivery: "answering",
       mode: "ask",
+      startedAt: Date.now(),
     });
     setPending((n) => n + 1);
     try {
@@ -404,6 +418,7 @@ export function ChatScreen({
       pending: true,
       delivery: "sending",
       mode: modeForTicket,
+      startedAt: Date.now(),
     });
 
     try {
@@ -912,7 +927,7 @@ export function ChatScreen({
 
       <Box flexDirection="column" flexGrow={1} flexShrink={1} overflowY="hidden" marginBottom={1}>
         {windowedFeed.map((item) => (
-          <FeedLine key={item.id} item={item} width={feedWidth} />
+          <FeedLine key={item.id} item={item} width={feedWidth} waitTick={waitTick} />
         ))}
       </Box>
 
@@ -947,11 +962,28 @@ export function ChatScreen({
   );
 }
 
-function FeedLine({ item, width }: { item: FeedItem; width: number }) {
+function FeedLine({
+  item,
+  width,
+  waitTick = 0,
+}: {
+  item: FeedItem;
+  width: number;
+  waitTick?: number;
+}) {
   if (item.kind === "ask") {
     const delivery = item.delivery;
     const chip = delivery ? DELIVERY_CHIP[delivery] : null;
     const badge = item.mode === "discuss" ? "DISCUSS" : "ASK";
+    const chipText =
+      delivery && isLiveDelivery(delivery)
+        ? formatLiveDeliveryChip(delivery, {
+            tick: waitTick,
+            startedAt: item.startedAt,
+          })
+        : delivery
+          ? formatLiveDeliveryChip(delivery)
+          : null;
     return (
       <Box width={width}>
         <Text backgroundColor="cyan" color="black" bold>
@@ -962,9 +994,9 @@ function FeedLine({ item, width }: { item: FeedItem; width: number }) {
           {" "}
           → {item.peer}{" "}
         </Text>
-        {chip ? (
+        {chip && chipText ? (
           <Text color={chip.color} bold={delivery === "answering" || delivery === "offline"}>
-            {formatDeliveryChip(delivery!)}{" "}
+            {chipText}{" "}
           </Text>
         ) : null}
         <Text color={theme.highlight} wrap="wrap">
