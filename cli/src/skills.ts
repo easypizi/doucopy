@@ -42,7 +42,7 @@ const LEGACY_SKILLS = [
   "agent-link-troubleshoot",
 ] as const;
 
-export type SkillsClient = "cursor" | "claude";
+export type SkillsClient = "cursor" | "claude" | "codex";
 
 export interface InstallSkillsOptions {
   home: string;
@@ -71,7 +71,8 @@ function resolveSourceDir(explicit?: string): string {
 
 function targetDir(home: string, client: SkillsClient): string {
   if (client === "cursor") return path.join(home, ".cursor/skills");
-  return path.join(home, ".claude/skills");
+  if (client === "claude") return path.join(home, ".claude/skills");
+  return path.join(home, ".codex/skills");
 }
 
 // Deep content comparison so we can skip an install when the destination
@@ -122,11 +123,11 @@ export function areAllSkillsInstalled(
 // contents differ from the shipped source. Upgrade scenarios still refresh
 // files, but re-running with the same source is a no-op that reports
 // `unchanged` for every skill so the caller can print an accurate summary.
-/** Remove shipped/legacy doucopy skill directories from cursor and claude skills homes. */
+/** Remove shipped/legacy doucopy skill directories from cursor, claude, and codex skills homes. */
 export function removeGlobalDoucopySkills(home: string): string[] {
   const removed: string[] = [];
   const names = [...SHIPPED_SKILLS, ...LEGACY_SKILLS];
-  for (const client of ["cursor", "claude"] as const) {
+  for (const client of ["cursor", "claude", "codex"] as const) {
     const dst = targetDir(home, client);
     if (!existsSync(dst)) continue;
     for (const name of names) {

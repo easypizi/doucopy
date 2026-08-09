@@ -178,7 +178,13 @@ describe("CodexHarness", () => {
     expect(result.answer).toBe("followup");
     const log = readFileSync(logFile, "utf8");
     const [invocation] = splitInvocations(log);
-    expect(invocation.slice(0, 3)).toEqual(["exec", "resume", "sid-42"]);
+    expect(invocation[0]).toBe("exec");
+    const resumeIdx = invocation.indexOf("resume");
+    expect(resumeIdx).toBeGreaterThan(0);
+    expect(invocation[resumeIdx + 1]).toBe("sid-42");
+    expect(invocation.indexOf("--sandbox")).toBeGreaterThan(0);
+    expect(invocation.indexOf("--sandbox")).toBeLessThan(resumeIdx);
+    expect(invocation.indexOf("workspace-write")).toBeLessThan(resumeIdx);
     expect(log).toContain(`CODEX_HOME=${path.join(workspace, ".codex-home")}`);
   });
 

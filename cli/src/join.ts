@@ -39,7 +39,7 @@ import {
 
 const NAME_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 type ResponderChoice = HarnessKind | "asker-only";
-const ASKER_ORDER: readonly SkillsClient[] = ["cursor", "claude"];
+const ASKER_ORDER: readonly SkillsClient[] = ["cursor", "claude", "codex"];
 type Client = "cursor" | "claude" | "codex";
 const CLIENT_ORDER: readonly Client[] = ["cursor", "claude", "codex"];
 
@@ -321,7 +321,7 @@ async function askResponder(flag: ResponderChoice | undefined, detected: Detecte
 
 async function askSkillsInstall(flag: boolean | undefined, clients: Client[], home: string, interactive: boolean): Promise<boolean> {
   if (flag !== undefined) return flag;
-  const skillClients = clients.filter((c): c is SkillsClient => c === "cursor" || c === "claude");
+  const skillClients = clients.filter((c): c is SkillsClient => ASKER_ORDER.includes(c));
   if (skillClients.length === 0) return false;
   // Skip the prompt entirely when nothing would change — the wizard
   // announces the current state instead of asking a redundant question.
@@ -556,7 +556,7 @@ export async function finalizeJoin(home: string, input: JoinFinalizeInput): Prom
   if (input.askers.includes("codex")) messages.push(`updated ${mergeCodexToml(home, input.relayUrl, input.token)}`);
 
   if (input.wantSkills) {
-    const skillClients = input.askers.filter((c): c is SkillsClient => c === "cursor" || c === "claude");
+    const skillClients = input.askers.filter((c): c is SkillsClient => ASKER_ORDER.includes(c));
     if (skillClients.length > 0) {
       const result = installGlobalSkills({ home, clients: skillClients });
       const installed = result.filter((r) => r.status === "installed").length;

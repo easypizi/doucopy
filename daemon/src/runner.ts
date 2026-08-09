@@ -1,31 +1,11 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { killProcessTree, resolveSpawn } from "./win-spawn.js";
 
 const TASK_INSTRUCTION = "Read the file task.md in this workspace and follow the instructions in it.";
 const CREATE_CHAT_TIMEOUT_MS = 30_000;
 const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
-
-// cursor-agent spawns child processes that inherit its stdio pipes. Killing only
-// the direct child leaves those grandchildren holding the pipes open, so waiting
-// for the process to "close" hangs forever. Each spawn below runs detached (its
-// own process group) and this kills the entire group.
-function killTree(proc: ChildProcess): void {
-  if (proc.pid !== undefined) {
-    try {
-      process.kill(-proc.pid, "SIGKILL");
-    } catch {
-      // process group already gone
-    }
-  }
-  try {
-    proc.kill("SIGKILL");
-  } catch {
-    // already dead
-  }
-  proc.stdout?.destroy();
-  proc.stderr?.destroy();
-}
 
 export interface RunnerOptions {
   binary: string;
@@ -42,9 +22,12 @@ export async function createChat(opts: RunnerOptions): Promise<string> {
     // cwd must be the conversation workspace so project `.cursor/cli.json`
     // permissions are loaded (Cursor resolves project config from cwd).
     mkdirSync(opts.workspaceDir, { recursive: true });
-    const proc = spawn(opts.binary, ["create-chat"], {
+    const invoked = resolveSpawn(opts.binary, ["create-chat"]);
+    const proc = spawn(invoked.command, invoked.args, {
       stdio: ["ignore", "pipe", "pipe"],
-      detached: true,
+      detached: invoked.detached,
+      shell: invoked.shell,
+      windowsHide: invoked.windowsHide,
       cwd: opts.workspaceDir,
     });
     let buffer = "";
@@ -53,7 +36,7 @@ export async function createChat(opts: RunnerOptions): Promise<string> {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      killTree(proc);
+      killProcessTree(proc);
       fn();
     };
     const timer = setTimeout(() => {
@@ -101,9 +84,12 @@ export async function runTask(
   return new Promise((resolve) => {
     // Same cwd requirement as createChat: without it, deny rules in
     // `<workspace>/.cursor/cli.json` are ignored and `--force` allows writes.
-    const proc = spawn(opts.binary, args, {
+    const invoked = resolveSpawn(opts.binary, args);
+    const proc = spawn(invoked.command, invoked.args, {
       stdio: ["ignore", "pipe", "pipe"],
-      detached: true,
+      detached: invoked.detached,
+      shell: invoked.shell,
+      windowsHide: invoked.windowsHide,
       cwd: opts.workspaceDir,
     });
     let stdout = "";
@@ -115,7 +101,7 @@ export async function runTask(
       settled = true;
       clearTimeout(timer);
       if (graceTimer) clearTimeout(graceTimer);
-      killTree(proc);
+      killProcessTree(proc);
       resolve(result);
     };
     const finalize = (code: number | null) => {

@@ -1,9 +1,10 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import { chmodSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { v7 as uuidv7 } from "uuid";
 import type { CodexSandbox } from "./permissions.js";
 import { createChat as cursorCreateChat, runTask as cursorRunTask, type RunnerOptions } from "./runner.js";
+import { killProcessTree, resolveSpawn } from "./win-spawn.js";
 
 export type HarnessKind = "cursor-agent" | "claude" | "codex";
 
@@ -28,15 +29,6 @@ export interface Harness {
 }
 
 const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
-
-function killTree(proc: ChildProcess): void {
-  if (proc.pid !== undefined) {
-    try { process.kill(-proc.pid, "SIGKILL"); } catch { /* group gone */ }
-  }
-  try { proc.kill("SIGKILL"); } catch { /* already dead */ }
-  proc.stdout?.destroy();
-  proc.stderr?.destroy();
-}
 
 function writeTaskFile(workspaceDir: string, taskContent: string): string {
   mkdirSync(workspaceDir, { recursive: true });
@@ -65,11 +57,14 @@ interface SpawnRunResult {
 // because of the grandchild-pipe workaround.
 function spawnAndCapture(opts: SpawnRunOptions): Promise<SpawnRunResult> {
   return new Promise((resolve) => {
-    const proc = spawn(opts.cmd, opts.args, {
+    const invoked = resolveSpawn(opts.cmd, opts.args);
+    const proc = spawn(invoked.command, invoked.args, {
       cwd: opts.cwd,
       env: opts.env ?? process.env,
       stdio: ["ignore", "pipe", "pipe"],
-      detached: true,
+      detached: invoked.detached,
+      shell: invoked.shell,
+      windowsHide: invoked.windowsHide,
     });
     let stdout = "";
     let stderr = "";
@@ -78,7 +73,7 @@ function spawnAndCapture(opts: SpawnRunOptions): Promise<SpawnRunResult> {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      killTree(proc);
+      killProcessTree(proc);
       resolve(result);
     };
     const timer = setTimeout(() => {
@@ -216,12 +211,16 @@ class CodexHarness implements Harness {
     writeTaskFile(opts.workspaceDir, task);
     const codexHome = this.codexHome(opts.workspaceDir);
     mkdirSync(codexHome, { recursive: true });
+    // Parent flags (--sandbox, --model) must come before the `resume`
+    // subcommand. ResumeArgs only accepts SESSION_ID / --last / --all /
+    // --image / PROMPT; anything else after `resume` is "unexpected argument".
     const args = [
-      "exec", "resume", sessionId,
+      "exec",
       "--skip-git-repo-check",
       "--sandbox", this.sandbox(opts),
       ...(opts.model ? ["--model", opts.model] : []),
       ...(opts.extraArgs ?? []),
+      "resume", sessionId,
       "Read the file task.md in this workspace and follow the instructions in it.",
     ];
     return spawnAndCapture({

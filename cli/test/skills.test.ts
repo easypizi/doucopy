@@ -53,6 +53,30 @@ describe("installGlobalSkills", () => {
     }
   });
 
+  it("targets ~/.codex/skills when the codex client is picked", () => {
+    const home = makeHome();
+    const source = makeSourceDir();
+    const installed = installGlobalSkills({ home, clients: ["codex"], sourceDir: source });
+    expect(installed).toHaveLength(SHIPPED_SKILLS.length);
+    for (const skill of SHIPPED_SKILLS) {
+      expect(existsSync(path.join(home, ".codex/skills", skill, "SKILL.md"))).toBe(true);
+    }
+  });
+
+  it("removeGlobalDoucopySkills clears cursor, claude, and codex skill homes", () => {
+    const home = makeHome();
+    const source = makeSourceDir();
+    installGlobalSkills({ home, clients: ["cursor", "claude", "codex"], sourceDir: source });
+    const removed = removeGlobalDoucopySkills(home);
+    for (const client of ["cursor", "claude", "codex"] as const) {
+      for (const skill of SHIPPED_SKILLS) {
+        const dir = path.join(home, `.${client}/skills`, skill);
+        expect(existsSync(dir)).toBe(false);
+        expect(removed).toContain(dir);
+      }
+    }
+  });
+
   it("marks the first install as `installed` and matching reinstalls as `unchanged`", () => {
     const home = makeHome();
     const source = makeSourceDir();

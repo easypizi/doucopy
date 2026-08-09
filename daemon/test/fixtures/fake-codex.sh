@@ -16,7 +16,17 @@ fi
 if [ "${FAKE_CODEX_MODE:-ok}" = "hang" ]; then
   sleep 30
 fi
-if [ "${1:-}" = "exec" ] && [ "${2:-}" != "resume" ]; then
+# First turn is `codex exec [flags] PROMPT`. Follow-ups insert `resume` before
+# the session id (after parent flags). Scan all args so flag reordering does
+# not break first-turn detection.
+is_resume=0
+for arg in "$@"; do
+  if [ "$arg" = "resume" ]; then
+    is_resume=1
+    break
+  fi
+done
+if [ "${1:-}" = "exec" ] && [ "$is_resume" -eq 0 ]; then
   session_id="${FAKE_CODEX_SESSION_ID:-11111111-2222-3333-4444-555555555555}"
   if [ -n "${CODEX_HOME:-}" ]; then
     dir="$CODEX_HOME/sessions/2026/07/27"

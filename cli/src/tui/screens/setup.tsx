@@ -291,7 +291,9 @@ export function SetupScreen({
 
     if (phase.kind === "skills") {
       ran.current = key;
-      const skillClients = (data.askers ?? []).filter((c): c is "cursor" | "claude" => c === "cursor" || c === "claude");
+      const skillClients = (data.askers ?? []).filter(
+        (c): c is "cursor" | "claude" | "codex" => c === "cursor" || c === "claude" || c === "codex",
+      );
       if (skillClients.length === 0 || skillsInstalledFn(home, skillClients)) {
         setData((d) => ({ ...d, wantSkills: false }));
         setPhase({ kind: "never" });
@@ -651,7 +653,9 @@ export function SetupScreen({
   }
 
   if (phase.kind === "skills") {
-    const skillClients = (data.askers ?? []).filter((c): c is "cursor" | "claude" => c === "cursor" || c === "claude");
+    const skillClients = (data.askers ?? []).filter(
+      (c): c is "cursor" | "claude" | "codex" => c === "cursor" || c === "claude" || c === "codex",
+    );
     if (skillClients.length === 0 || areAllSkillsInstalled(home, skillClients)) {
       return <Text color={theme.dim}>Skipping skills…</Text>;
     }
