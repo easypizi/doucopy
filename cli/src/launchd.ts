@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildDaemonPathValue } from "./daemon-path.js";
 import {
   installWindowsDaemon,
   isWindowsDaemonRunning,
@@ -80,12 +81,16 @@ export function renderPlist(
     path.join(repoRoot, "daemon/launchd", `${LABEL}.plist`),
     "utf8",
   );
+  const daemonPath = buildDaemonPathValue({
+    nodeBin,
+    pathHome,
+    platform: "darwin",
+  });
   return template
     .replaceAll("__PROGRAM_ARGUMENTS__", programArgumentsXml(nodeBin, repoRoot, keepAwake))
     .replaceAll("__HOME__", home)
-    // Binary lookup must use the real user home. Log/config paths may use `home`
-    // (tests write under tmp), but PATH must still find ~/.local/bin/cursor-agent.
-    .replaceAll("__PATH_HOME__", pathHome);
+    // Includes dirname(nodeBin) so nvm/npm -g claude/codex resolve, plus ~/.local/bin for cursor-agent.
+    .replaceAll("__DAEMON_PATH__", daemonPath);
 }
 
 /** Block installing the real OS supervisor for vitest / foreign HOME directories. */

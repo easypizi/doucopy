@@ -37,6 +37,8 @@ describe("renderWindowsWrapper", () => {
     expect(cmd).toContain(path.join(home, ".doucopy", "responder.log"));
     expect(cmd).toContain(path.join(home, ".doucopy", "responder.err.log"));
     expect(cmd).toMatch(/PATH=/i);
+    // node dir first so npm -g claude/codex resolve under the same Node install
+    expect(cmd).toMatch(/set "PATH=C:\\Program Files\\nodejs;/i);
   });
 });
 

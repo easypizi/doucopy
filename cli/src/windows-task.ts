@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { hostname, userInfo } from "node:os";
 import path from "node:path";
+import { buildDaemonPathValue } from "./daemon-path.js";
 
 export const WINDOWS_TASK_NAME = "doucopy-responder";
 
@@ -59,9 +60,15 @@ export function windowsTaskXmlPath(home: string): string {
 export function renderWindowsWrapper(nodeBin: string, daemonEntry: string, home: string): string {
   const logOut = path.join(home, ".doucopy", "responder.log");
   const logErr = path.join(home, ".doucopy", "responder.err.log");
+  // Prepend absolute dirs (incl. dirname(node) for nvm/npm -g) then keep the live %PATH%.
+  const prefix = buildDaemonPathValue({
+    nodeBin,
+    pathHome: home,
+    platform: "win32",
+  });
   const lines = [
     "@echo off",
-    "set \"PATH=%USERPROFILE%\\.local\\bin;%LOCALAPPDATA%\\Programs\\cursor\\resources\\app\\bin;%APPDATA%\\npm;%ProgramFiles%\\nodejs;%PATH%\"",
+    `set "PATH=${prefix};%PATH%"`,
     `${cmdQuote(nodeBin)} ${cmdQuote(daemonEntry)} >> ${cmdQuote(logOut)} 2>> ${cmdQuote(logErr)}`,
     "",
   ];

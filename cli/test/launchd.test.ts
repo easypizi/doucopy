@@ -60,9 +60,16 @@ describe("launchd keep_awake plist", () => {
   });
 
   it("renders a full plist with caffeinate args", () => {
-    const plist = renderPlist("/usr/bin/node", ROOT, "/Users/me", true, "/Users/real");
+    const plist = renderPlist(
+      "/Users/real/.nvm/versions/node/v22.11.0/bin/node",
+      ROOT,
+      "/Users/me",
+      true,
+      "/Users/real",
+    );
     expect(plist).toContain("<string>/usr/bin/caffeinate</string>");
     expect(plist).toContain("/Users/me/.doucopy/responder.log");
+    expect(plist).toContain("/Users/real/.nvm/versions/node/v22.11.0/bin");
     expect(plist).toContain("/Users/real/.local/bin");
     expect(plist).not.toContain("/Users/me/.local/bin");
     expect(plist).toContain("com.doucopy.responder");
