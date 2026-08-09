@@ -182,9 +182,12 @@ describe("CodexHarness", () => {
     const resumeIdx = invocation.indexOf("resume");
     expect(resumeIdx).toBeGreaterThan(0);
     expect(invocation[resumeIdx + 1]).toBe("sid-42");
-    expect(invocation.indexOf("--sandbox")).toBeGreaterThan(0);
-    expect(invocation.indexOf("--sandbox")).toBeLessThan(resumeIdx);
-    expect(invocation.indexOf("workspace-write")).toBeLessThan(resumeIdx);
+    // Resume must not pass --sandbox (Codex rejects it). Use -c override.
+    expect(invocation).not.toContain("--sandbox");
+    const cIdx = invocation.indexOf("-c");
+    expect(cIdx).toBeGreaterThan(0);
+    expect(cIdx).toBeLessThan(resumeIdx);
+    expect(invocation[cIdx + 1]).toBe('sandbox_mode="workspace-write"');
     expect(log).toContain(`CODEX_HOME=${path.join(workspace, ".codex-home")}`);
   });
 
@@ -203,6 +206,32 @@ describe("CodexHarness", () => {
     const [invocation] = splitInvocations(readFileSync(logFile, "utf8"));
     expect(invocation).toContain("danger-full-access");
     expect(invocation).not.toContain("workspace-write");
+  });
+
+  it("runFollowupTask passes sandbox via -c override, not --sandbox", async () => {
+    const harness = createHarness("codex");
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-codex-"));
+    const workspace = path.join(dir, "workspace");
+    const logFile = path.join(dir, "args.log");
+    process.env.FAKE_CODEX_LOG = logFile;
+    process.env.FAKE_CODEX_ANSWER = "followup";
+    await harness.runFollowupTask(
+      {
+        binary: CODEX_FIXTURE,
+        workspaceDir: workspace,
+        timeoutMs: 5000,
+        codexSandbox: "danger-full-access",
+        model: "gpt-test",
+      },
+      "sid-99",
+      "T",
+    );
+    const [invocation] = splitInvocations(readFileSync(logFile, "utf8"));
+    expect(invocation).not.toContain("--sandbox");
+    expect(invocation).toContain("-c");
+    expect(invocation).toContain('sandbox_mode="danger-full-access"');
+    expect(invocation).toContain("--model");
+    expect(invocation).toContain("gpt-test");
   });
 });
 

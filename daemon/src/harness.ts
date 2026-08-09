@@ -211,13 +211,14 @@ class CodexHarness implements Harness {
     writeTaskFile(opts.workspaceDir, task);
     const codexHome = this.codexHome(opts.workspaceDir);
     mkdirSync(codexHome, { recursive: true });
-    // Parent flags (--sandbox, --model) must come before the `resume`
-    // subcommand. ResumeArgs only accepts SESSION_ID / --last / --all /
-    // --image / PROMPT; anything else after `resume` is "unexpected argument".
+    // `codex exec resume` rejects `--sandbox` even before the subcommand:
+    // that flag is not global (only plain `codex exec` accepts it). Use the
+    // global `-c sandbox_mode=...` override instead. `--skip-git-repo-check`
+    // and `--model` are global and remain fine.
     const args = [
       "exec",
       "--skip-git-repo-check",
-      "--sandbox", this.sandbox(opts),
+      "-c", `sandbox_mode="${this.sandbox(opts)}"`,
       ...(opts.model ? ["--model", opts.model] : []),
       ...(opts.extraArgs ?? []),
       "resume", sessionId,
