@@ -116,7 +116,7 @@ export function ChatScreen({
   const primedRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const staleClearedRef = useRef<string | null>(null);
-  const { rows: termRows } = useWindowSize();
+  const { rows: termRows, columns: termCols } = useWindowSize();
   useHoldKeyCapture(inputActive && mode === "feed");
 
   useEffect(() => {
@@ -628,8 +628,9 @@ export function ChatScreen({
   const visibleFeed = filterDialogId
     ? feed.filter((f) => !f.dialogId || f.dialogId === filterDialogId)
     : feed;
-  // Header/tabs/footer live outside Chat; reserve chrome inside the panel.
-  const feedBudget = Math.max(4, Math.min(40, (termRows || 24) - 14));
+  // Max feed *items* to show (not terminal rows). Do not force a tall empty Box.
+  const feedBudget = Math.max(6, Math.min(16, (termRows || 24) - 14));
+  const feedWidth = Math.max(40, (termCols || 80) - 8);
   const maxScroll = Math.max(0, visibleFeed.length - feedBudget);
   const pinnedOffset = Math.min(scrollFromBottom, maxScroll);
   const windowStart = Math.max(0, visibleFeed.length - feedBudget - pinnedOffset);
@@ -909,14 +910,9 @@ export function ChatScreen({
         </Text>
       </Box>
 
-      <Box
-        flexDirection="column"
-        height={feedBudget}
-        overflowY="hidden"
-        marginBottom={1}
-      >
+      <Box flexDirection="column" flexGrow={1} flexShrink={1} overflowY="hidden" marginBottom={1}>
         {windowedFeed.map((item) => (
-          <FeedLine key={item.id} item={item} />
+          <FeedLine key={item.id} item={item} width={feedWidth} />
         ))}
       </Box>
 
@@ -951,13 +947,13 @@ export function ChatScreen({
   );
 }
 
-function FeedLine({ item }: { item: FeedItem }) {
+function FeedLine({ item, width }: { item: FeedItem; width: number }) {
   if (item.kind === "ask") {
     const delivery = item.delivery;
     const chip = delivery ? DELIVERY_CHIP[delivery] : null;
     const badge = item.mode === "discuss" ? "DISCUSS" : "ASK";
     return (
-      <Box>
+      <Box width={width}>
         <Text backgroundColor="cyan" color="black" bold>
           {" "}
           {badge}{" "}
@@ -971,40 +967,54 @@ function FeedLine({ item }: { item: FeedItem }) {
             {formatDeliveryChip(delivery!)}{" "}
           </Text>
         ) : null}
-        <Text color={theme.highlight}>{item.text}</Text>
+        <Text color={theme.highlight} wrap="wrap">
+          {item.text}
+        </Text>
       </Box>
     );
   }
   if (item.kind === "reply") {
     const isFinal = item.text.startsWith("FINAL · ");
     return (
-      <Box>
-        <Text backgroundColor="green" color="black" bold>
-          {" "}
-          {isFinal ? "FINAL" : "REPLY"}{" "}
-        </Text>
-        <Text color={theme.ok} bold>
-          {" "}
-          ← {item.peer}{" "}
-        </Text>
-        <Text>{isFinal ? item.text.slice("FINAL · ".length) : item.text}</Text>
+      <Box width={width} flexDirection="column">
+        <Box>
+          <Text backgroundColor="green" color="black" bold>
+            {" "}
+            {isFinal ? "FINAL" : "REPLY"}{" "}
+          </Text>
+          <Text color={theme.ok} bold>
+            {" "}
+            ← {item.peer}{" "}
+          </Text>
+        </Box>
+        <Text wrap="wrap">{isFinal ? item.text.slice("FINAL · ".length) : item.text}</Text>
       </Box>
     );
   }
   if (item.kind === "note") {
     return (
-      <Text color={theme.dim}>
-        note · {item.text}
-      </Text>
+      <Box width={width}>
+        <Text color={theme.dim} wrap="truncate">
+          note · {item.text}
+        </Text>
+      </Box>
     );
   }
   if (item.kind === "status") {
     return (
-      <Text color={theme.dim}>
-        · {item.peer ? `${item.peer}: ` : ""}
-        {item.text}
-      </Text>
+      <Box width={width}>
+        <Text color={theme.dim} wrap="truncate">
+          · {item.peer ? `${item.peer}: ` : ""}
+          {item.text}
+        </Text>
+      </Box>
     );
   }
-  return <Text color={theme.dim}>{item.text}</Text>;
+  return (
+    <Box width={width}>
+      <Text color={theme.dim} wrap="wrap">
+        {item.text}
+      </Text>
+    </Box>
+  );
 }

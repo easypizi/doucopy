@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createHarness, findLatestCodexSessionId } from "../src/harness.js";
+import { createHarness, findLatestCodexSessionId, summarizeHarnessStderr } from "../src/harness.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLAUDE_FIXTURE = path.resolve(HERE, "fixtures/fake-claude.sh");
@@ -232,6 +232,23 @@ describe("CodexHarness", () => {
     expect(invocation).toContain('sandbox_mode="danger-full-access"');
     expect(invocation).toContain("--model");
     expect(invocation).toContain("gpt-test");
+  });
+});
+
+describe("summarizeHarnessStderr", () => {
+  it("prefers an Error: line over the Codex session banner", () => {
+    const raw = [
+      "Reading additional input from stdin...",
+      "OpenAI Codex v0.142.0",
+      "workdir: /tmp/x",
+      "Error: boom happened here. more",
+    ].join("\n");
+    expect(summarizeHarnessStderr(raw)).toMatch(/^Error: boom happened here/i);
+  });
+
+  it("maps stdin-hang banners to a short hint", () => {
+    const raw = "Reading additional input from stdin...\nOpenAI Codex v0.142.0\nworkdir: /tmp";
+    expect(summarizeHarnessStderr(raw)).toMatch(/stdin hang/i);
   });
 });
 

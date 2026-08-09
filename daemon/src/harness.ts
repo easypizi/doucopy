@@ -52,20 +52,41 @@ interface SpawnRunResult {
   error?: string;
 }
 
+/** Prefer a short actionable line over Codex session banners in stderr. */
+export function summarizeHarnessStderr(stderr: string): string {
+  const text = stderr.replace(/\s+/gu, " ").trim();
+  if (!text) return "";
+  const errorMatch = text.match(/\bError:\s*[^.]{1,200}/i)
+    ?? text.match(/\berror:\s*[^.]{1,200}/i);
+  if (errorMatch) return errorMatch[0]!.trim();
+  if (/Reading additional input from stdin/i.test(text)) {
+    return "stdin hang (codex waited for piped input). doucopy closes stdin after spawn.";
+  }
+  return text.slice(0, 500);
+}
+
 // Generic "run to completion, capture stdout, kill on timeout" driver used by
 // the Claude and Codex harnesses. Cursor keeps its own path in runner.ts
 // because of the grandchild-pipe workaround.
 function spawnAndCapture(opts: SpawnRunOptions): Promise<SpawnRunResult> {
   return new Promise((resolve) => {
     const invoked = resolveSpawn(opts.cmd, opts.args);
+    // Use an explicit stdin pipe and close it immediately. Codex `exec` treats
+    // an open non-TTY stdin as "read more prompt" and hangs forever; `ignore`
+    // is not always enough across Codex versions / detached spawns.
     const proc = spawn(invoked.command, invoked.args, {
       cwd: opts.cwd,
       env: opts.env ?? process.env,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
       detached: invoked.detached,
       shell: invoked.shell,
       windowsHide: invoked.windowsHide,
     });
+    try {
+      proc.stdin?.end();
+    } catch {
+      // already closed
+    }
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -79,26 +100,32 @@ function spawnAndCapture(opts: SpawnRunOptions): Promise<SpawnRunResult> {
     const timer = setTimeout(() => {
       settle({ error: `${opts.labelForError} failed: timed out after ${opts.timeoutMs}ms` });
     }, opts.timeoutMs);
-    proc.stdout.on("data", (chunk: Buffer) => {
+    proc.stdout?.on("data", (chunk: Buffer) => {
       stdout += chunk.toString("utf8");
       if (stdout.length > MAX_OUTPUT_BYTES) {
         settle({ error: `${opts.labelForError} failed: output exceeded 10MB` });
       }
     });
-    proc.stderr.on("data", (chunk: Buffer) => {
+    proc.stderr?.on("data", (chunk: Buffer) => {
       if (stderr.length < MAX_OUTPUT_BYTES) stderr += chunk.toString("utf8");
     });
     proc.on("error", (err) => {
       settle({ error: `${opts.labelForError} failed: ${err.message.slice(0, 500)}` });
     });
     proc.on("close", (code) => {
+      const answer = stdout.trim();
+      // Codex may print a usable final message on stdout and still exit
+      // non-zero after a stdin/banner quirk. Prefer the answer when present.
+      if (answer) {
+        settle({ answer });
+        return;
+      }
       if (code !== 0) {
-        const detail = stderr.trim() || `exited with code ${code}`;
+        const detail = summarizeHarnessStderr(stderr) || `exited with code ${code}`;
         settle({ error: `${opts.labelForError} failed: ${detail.slice(0, 500)}` });
         return;
       }
-      const answer = stdout.trim();
-      settle(answer ? { answer } : { error: `${opts.labelForError} produced empty output` });
+      settle({ error: `${opts.labelForError} produced empty output` });
     });
   });
 }
