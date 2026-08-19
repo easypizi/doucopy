@@ -31,6 +31,7 @@ export function buildDaemonPathDirs(opts: DaemonPathOptions): string[] {
     return uniqueExistingPreferred([
       nodeDir,
       p.join(home, ".local", "bin"),
+      p.join(localAppData, "cursor-agent"),
       p.join(localAppData, "Programs", "cursor", "resources", "app", "bin"),
       p.join(appData, "npm"),
       p.join(programFiles, "nodejs"),

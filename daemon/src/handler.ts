@@ -1,6 +1,7 @@
 import fg from "fast-glob";
 import { homedir } from "node:os";
 import path from "node:path";
+import { writeInboxAttachments } from "./attachments.js";
 import { normalizeTranscriptGlobs, resolveHarness, type DaemonConfig } from "./config.js";
 import type { ConversationStore } from "./conversations.js";
 import { discoverExtraFiles, discoverSkillRoots, unionPaths } from "./discover-memory.js";
@@ -103,6 +104,15 @@ export function createHandler(
       config.responder.workspace_dir,
       safeDirName(question.conversation_id),
     );
+    let attachmentPaths: string[] = [];
+    try {
+      attachmentPaths = writeInboxAttachments(conversationWorkspace, question.attachments);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return redactResult(parsedPolicy.neverReveal, {
+        error: `attachment write failed: ${message.slice(0, 500)}`,
+      });
+    }
     const liveConfig = withLiveMemory(config);
     const perms = buildPermissions(liveConfig, conversationWorkspace);
     logRestrictionsSummary(perms);
@@ -129,6 +139,7 @@ export function createHandler(
         hops: question.hops,
         mode: question.mode,
         brief: question.brief,
+        attachmentPaths,
       };
       const task = isFirstTurn
         ? buildFirstTask(parsedPolicy.text, question.question, collectMemory(liveConfig), ctx, promptOpts)

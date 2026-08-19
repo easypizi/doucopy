@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { homedir } from "node:os";
 import { parseArgs } from "node:util";
+import { applyAsciiOutputMode } from "./ascii-output.js";
 import { runChat } from "./chat.js";
 import { shellExec } from "./exec.js";
 import { runInvite } from "./invite.js";
@@ -63,6 +64,7 @@ function hasYes(args: string[]): boolean {
 }
 
 async function main(): Promise<void> {
+  applyAsciiOutputMode();
   const [command, ...rest] = process.argv.slice(2);
   const home = homedir();
   if (migrateLegacyHome(home)) {

@@ -5,11 +5,13 @@ import { describe, expect, it, vi } from "vitest";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import {
   WINDOWS_TASK_NAME,
+  deleteWindowsDaemon,
   installWindowsDaemon,
   isWindowsDaemonRunning,
   parseSchtasksRunning,
   renderWindowsTaskXml,
   renderWindowsWrapper,
+  stopWindowsDaemon,
   windowsCmdPath,
   windowsTaskUserId,
   windowsTaskXmlPath,
@@ -39,6 +41,32 @@ describe("renderWindowsWrapper", () => {
     expect(cmd).toMatch(/PATH=/i);
     // node dir first so npm -g claude/codex resolve under the same Node install
     expect(cmd).toMatch(/set "PATH=C:\\Program Files\\nodejs;/i);
+    expect(cmd).toContain('set "USERPROFILE=C:\\Users\\me"');
+    expect(cmd).toContain('set "HOMEDRIVE=C:"');
+    expect(cmd).toContain('set "HOMEPATH=\\Users\\me"');
+    expect(cmd).toContain('set "APPDATA=C:\\Users\\me\\AppData\\Roaming"');
+    expect(cmd).toContain('set "LOCALAPPDATA=C:\\Users\\me\\AppData\\Local"');
+    expect(cmd).toContain("C:\\Users\\me\\AppData\\Local\\cursor-agent");
+  });
+});
+
+describe("stopWindowsDaemon", () => {
+  it("disables before ending, and never deletes the task", () => {
+    const run = vi.fn().mockReturnValue({ status: 0, stdout: "", stderr: "" });
+    stopWindowsDaemon(run);
+    expect(run.mock.calls.map((c) => c[0])).toEqual([
+      ["/Change", "/TN", WINDOWS_TASK_NAME, "/DISABLE"],
+      ["/End", "/TN", WINDOWS_TASK_NAME],
+    ]);
+  });
+});
+
+describe("deleteWindowsDaemon", () => {
+  it("ends and deletes the task (uninstall)", () => {
+    const run = vi.fn().mockReturnValue({ status: 0, stdout: "", stderr: "" });
+    deleteWindowsDaemon(run);
+    expect(run).toHaveBeenCalledWith(["/End", "/TN", WINDOWS_TASK_NAME]);
+    expect(run).toHaveBeenCalledWith(["/Delete", "/TN", WINDOWS_TASK_NAME, "/F"]);
   });
 });
 

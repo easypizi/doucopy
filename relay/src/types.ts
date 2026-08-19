@@ -1,5 +1,11 @@
 export type AskMode = "ask" | "discuss";
 
+/** UTF-8 text file attached by the asker for the responder workspace. */
+export interface Attachment {
+  name: string;
+  content: string;
+}
+
 export interface Question {
   ticket_id: string;
   from_peer: string;
@@ -10,4 +16,5 @@ export interface Question {
   deadline: number;
   mode?: AskMode;
   brief?: string;
+  attachments?: Attachment[];
 }

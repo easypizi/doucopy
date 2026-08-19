@@ -1,6 +1,12 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { bearerToken, PEER_NAME_PATTERN, type TokenService } from "./auth.js";
-import { ConversationFullError, HopLimitError, MAX_HOPS, type Mailbox } from "./mailbox.js";
+import {
+  AttachmentValidationError,
+  ConversationFullError,
+  HopLimitError,
+  MAX_HOPS,
+  type Mailbox,
+} from "./mailbox.js";
 
 const MAX_WAIT_SECONDS = 25;
 const JOIN_WINDOW_MS = 60_000;
@@ -129,11 +135,12 @@ export function registerRest(app: FastifyInstance, mailbox: Mailbox, tokens: Tok
       hops?: number;
       mode?: string;
       brief?: string;
+      attachments?: Array<{ name?: string; content?: string }>;
     };
   }>("/ask", async (req, reply) => {
     const fromPeer = authPeer(req, tokens);
     if (!fromPeer) return reply.code(401).send({ error: "unauthorized" });
-    const { peer, question, wait_seconds, conversation_id, hops, mode, brief } = req.body ?? {};
+    const { peer, question, wait_seconds, conversation_id, hops, mode, brief, attachments } = req.body ?? {};
     if (!peer || typeof peer !== "string") return reply.code(400).send({ error: "peer required" });
     if (!question || typeof question !== "string") return reply.code(400).send({ error: "question required" });
     if (peer === fromPeer) return reply.code(400).send({ error: "cannot ask yourself" });
@@ -151,9 +158,14 @@ export function registerRest(app: FastifyInstance, mailbox: Mailbox, tokens: Tok
         clientHops: hops ?? 0,
         mode: mode === "discuss" ? "discuss" : "ask",
         brief: typeof brief === "string" ? brief : undefined,
+        attachments,
       }));
     } catch (err) {
-      if (err instanceof HopLimitError || err instanceof ConversationFullError) {
+      if (
+        err instanceof HopLimitError ||
+        err instanceof ConversationFullError ||
+        err instanceof AttachmentValidationError
+      ) {
         return reply.code(400).send({ status: "error", error: err.message });
       }
       throw err;

@@ -128,8 +128,11 @@ export function applyWindowsStayAwake(run: PowerShellRunner = defaultPowershell)
 }
 
 export function stopWindowsScheduledTask(run: SchtasksRunner = defaultSchtasks): void {
+  // Match CLI stop: keep the task registered so restart / logon can re-enable it.
+  // Disable first: /End kills this very process tree, so a later /Change would never run
+  // and RestartOnFailure would revive the responder the owner just declined.
+  run(["/Change", "/TN", WINDOWS_TASK_NAME, "/DISABLE"]);
   run(["/End", "/TN", WINDOWS_TASK_NAME]);
-  run(["/Delete", "/TN", WINDOWS_TASK_NAME, "/F"]);
 }
 
 /**

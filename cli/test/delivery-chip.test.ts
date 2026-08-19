@@ -12,10 +12,10 @@ describe("delivery chip", () => {
     expect(deliveryFromPhase("queued")).toBe("queued");
     expect(deliveryFromPhase("working")).toBe("answering");
     expect(deliveryFromPhase(undefined, true)).toBe("offline");
-    expect(formatDeliveryChip("queued")).toBe("○ queued");
-    expect(formatDeliveryChip("answering")).toBe("● answering");
-    expect(formatDeliveryChip("done")).toBe("✓ done");
-    expect(formatDeliveryChip("error")).toBe("× error");
+    expect(formatDeliveryChip("queued")).toBe("○");
+    expect(formatDeliveryChip("answering")).toBe("●");
+    expect(formatDeliveryChip("done")).toBe("✓");
+    expect(formatDeliveryChip("error")).toBe("×");
   });
 
   it("uses BMP glyphs only (no private-use / nerd-font range)", () => {
@@ -28,17 +28,15 @@ describe("delivery chip", () => {
     }
   });
 
-  it("formats live chip with spinner frame and elapsed seconds", () => {
+  it("formats live chip with spinner frame and elapsed seconds, no word labels", () => {
     const startedAt = 1_000_000;
     expect(
       formatLiveDeliveryChip("answering", { tick: 0, startedAt, now: startedAt + 12_400 }),
-    ).toBe("● answering 12s");
+    ).toBe("● 12s");
     expect(
       formatLiveDeliveryChip("answering", { tick: 1, startedAt, now: startedAt + 12_400 }),
-    ).toBe("◐ answering 12s");
-    expect(formatLiveDeliveryChip("done")).toBe("✓ done");
-    expect(formatLiveDeliveryChip("sending", { tick: 2, startedAt, now: startedAt })).toBe(
-      "○ sending",
-    );
+    ).toBe("◐ 12s");
+    expect(formatLiveDeliveryChip("done")).toBe("✓");
+    expect(formatLiveDeliveryChip("sending", { tick: 2, startedAt, now: startedAt })).toBe("○");
   });
 });

@@ -288,6 +288,63 @@ describe("Mailbox", () => {
     expect(box.incomingFor("work")[0]?.mode).toBe("discuss");
   });
 
+  it("stores validated attachments on enqueue", async () => {
+    const box = new Mailbox();
+    const { ticket_id } = box.enqueue("work", "personal", "see file", {
+      attachments: [{ name: "notes.md", content: "hello" }],
+    });
+    const q = await box.takeNext("work", 0);
+    expect(q).toMatchObject({
+      ticket_id,
+      attachments: [{ name: "notes.md", content: "hello" }],
+    });
+  });
+
+  it("rejects invalid attachment names and empty content", () => {
+    const box = new Mailbox();
+    expect(() =>
+      box.enqueue("work", "personal", "x", {
+        attachments: [{ name: "../etc/passwd", content: "x" }],
+      }),
+    ).toThrow(/attachment name/);
+    expect(() =>
+      box.enqueue("work", "personal", "x", {
+        attachments: [{ name: "ok.md", content: "" }],
+      }),
+    ).toThrow(/must not be empty/);
+  });
+
+  it("caps attachment bytes queued for one peer and frees the budget on takeNext", async () => {
+    const box = new Mailbox();
+    const chunk = "a".repeat(256 * 1024);
+    const bigSet = () => [
+      { name: "a.txt", content: chunk },
+      { name: "b.txt", content: chunk },
+    ];
+    // 512 KiB per ask, so the 4 MiB per-peer budget fits exactly eight queued asks.
+    for (let i = 0; i < 8; i += 1) {
+      box.enqueue("work", "personal", `q${i}`, { attachments: bigSet() });
+    }
+    expect(() =>
+      box.enqueue("work", "personal", "one too many", { attachments: bigSet() }),
+    ).toThrow(/too many queued attachment bytes/);
+    // Questions without attachments are never blocked by the budget.
+    expect(() => box.enqueue("work", "personal", "plain")).not.toThrow();
+    await box.takeNext("work", 0);
+    expect(() => box.enqueue("work", "personal", "now fits", { attachments: bigSet() })).not.toThrow();
+  });
+
+  it("skips the queue budget when a responder is already waiting", async () => {
+    const box = new Mailbox();
+    const chunk = "a".repeat(256 * 1024);
+    const pending = box.takeNext("work", 1000);
+    box.enqueue("work", "personal", "straight through", {
+      attachments: [{ name: "a.txt", content: chunk }],
+    });
+    const q = await pending;
+    expect(q?.attachments).toHaveLength(1);
+  });
+
   it("cancelByOwner and answerByOwner settle only for the assignee", () => {
     const box = new Mailbox();
     const { ticket_id } = box.enqueue("work", "personal", "hi");

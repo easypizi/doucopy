@@ -10,7 +10,7 @@ export function buildApp(env: NodeJS.ProcessEnv = process.env): FastifyInstance 
   if (!env.RELAY_SECRET) throw new Error("RELAY_SECRET is required");
   const tokens = createTokenService(env.RELAY_SECRET, env.REVOKED_PEERS);
   const mailbox = new Mailbox();
-  const app = Fastify({ logger: true });
+  const app = Fastify({ logger: true, bodyLimit: 2 * 1024 * 1024 });
   registerRest(app, mailbox, tokens);
 
   // Stateless streamable HTTP: a fresh server+transport pair per request.

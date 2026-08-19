@@ -1,5 +1,14 @@
 import { v7 as uuidv7 } from "uuid";
+import {
+  AttachmentValidationError,
+  attachmentsByteSize,
+  MAX_PEER_QUEUED_ATTACHMENT_BYTES,
+  normalizeAttachments,
+} from "./attachments.js";
 import type { AskMode, Question } from "./types.js";
+
+export { AttachmentValidationError, MAX_PEER_QUEUED_ATTACHMENT_BYTES } from "./attachments.js";
+export type { Attachment } from "./types.js";
 
 const QUESTION_TTL_MS = 24 * 60 * 60 * 1000;
 const RETENTION_MS = QUESTION_TTL_MS;
@@ -75,6 +84,8 @@ export interface EnqueueOptions {
   clientHops?: number;
   mode?: AskMode;
   brief?: string;
+  /** Raw attachment payload. Validated by normalizeAttachments inside enqueue. */
+  attachments?: unknown;
 }
 
 interface Waiter {
@@ -111,6 +122,17 @@ export class Mailbox {
     const clientHops = opts.clientHops ?? 0;
     const mode: AskMode = opts.mode === "discuss" ? "discuss" : "ask";
     const brief = typeof opts.brief === "string" && opts.brief.trim() ? opts.brief.trim().slice(0, 2000) : undefined;
+    const attachments = normalizeAttachments(opts.attachments);
+    // Only queued questions pile up in memory. A waiting responder takes this one straight away.
+    if (attachments && (this.waiters.get(toPeer)?.length ?? 0) === 0) {
+      const queued = this.queuedAttachmentBytes(toPeer) + attachmentsByteSize(attachments);
+      if (queued > MAX_PEER_QUEUED_ATTACHMENT_BYTES) {
+        throw new AttachmentValidationError(
+          `peer ${toPeer} has too many queued attachment bytes (max ${MAX_PEER_QUEUED_ATTACHMENT_BYTES});` +
+            ` wait for the responder to drain its inbox`,
+        );
+      }
+    }
 
     const now = Date.now();
     const ticket_id = uuidv7();
@@ -142,6 +164,7 @@ export class Mailbox {
       deadline: now + QUESTION_TTL_MS,
       mode,
       brief,
+      attachments,
     };
     const entry: PendingEntry = {
       peer: toPeer,
@@ -174,6 +197,14 @@ export class Mailbox {
       this.inbox.set(toPeer, queue);
     }
     return { ticket_id, conversation_id };
+  }
+
+  private queuedAttachmentBytes(peer: string): number {
+    const queue = this.inbox.get(peer);
+    if (!queue) return 0;
+    let total = 0;
+    for (const item of queue) total += attachmentsByteSize(item.attachments);
+    return total;
   }
 
   takeNext(peer: string, waitMs: number): Promise<Question | null> {

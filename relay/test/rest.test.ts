@@ -435,4 +435,37 @@ describe("POST /ask discuss mode", () => {
     const q = await ctx.mailbox.takeNext("work", 0);
     expect(q).toMatchObject({ mode: "discuss", brief: "keep it short", question: "collaborate?" });
   });
+
+  it("accepts attachments and rejects bad names with 400", async () => {
+    const ctx = makeApp();
+    await ctx.mailbox.takeNext("work", 0);
+    const ok = await ctx.app.inject({
+      method: "POST",
+      url: "/ask",
+      headers: { authorization: `Bearer ${ctx.personalToken}` },
+      payload: {
+        peer: "work",
+        question: "read this",
+        wait_seconds: 0,
+        attachments: [{ name: "snippet.ts", content: "const x = 1;" }],
+      },
+    });
+    expect(ok.statusCode).toBe(200);
+    const q = await ctx.mailbox.takeNext("work", 0);
+    expect(q?.attachments).toEqual([{ name: "snippet.ts", content: "const x = 1;" }]);
+
+    const bad = await ctx.app.inject({
+      method: "POST",
+      url: "/ask",
+      headers: { authorization: `Bearer ${ctx.personalToken}` },
+      payload: {
+        peer: "work",
+        question: "nope",
+        wait_seconds: 0,
+        attachments: [{ name: "../secret", content: "x" }],
+      },
+    });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json()).toMatchObject({ status: "error" });
+  });
 });

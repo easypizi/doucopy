@@ -123,6 +123,7 @@ export async function askPeer(
     hops?: number;
     mode?: AskMode;
     brief?: string;
+    attachments?: Array<{ name: string; content: string }>;
   },
   fetchImpl: typeof fetch = fetch,
 ): Promise<AskResult> {

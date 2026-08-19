@@ -28,14 +28,31 @@ There is exactly one exception. If, and only if, you need a clarifying fact from
 
 ## Discuss mode (`mode: "discuss"`)
 
-Use when you need several collaborative turns with the peer agent before answering the human.
+Use **discuss** when you need several collaborative turns with the peer agent before answering the human. Use default **ask** for a one-shot Q&A.
 
-1. Stay on one `conversation_id`. Cap: 4 open tickets per conversation (same as ask).
-2. Pass a short `brief` when the peer needs process instructions (what to check, tone, constraints). Do not dump your full chat.
-3. You may reformulate and continue until you can produce a **FINAL** answer for the human.
-4. Do not dump intermediate agent chatter as the user-visible reply. Compact status lines are fine ("discussing…"). Only the FINAL goes to the user.
-5. Responder may still use one counter-question per ticket (`hops: 1`) when needed.
-6. Default `mode` is `ask` (one-shot). Only use discuss when multi-turn collaboration helps.
+### When to pick discuss
+
+- You need the peer to dig, compare, or iterate before a usable answer.
+- You will reformulate based on what they return.
+- A single self-contained question would waste a turn or produce a half-answer.
+
+### When to stay on ask
+
+- One clear question, one clear answer is enough.
+- You already know exactly what to ask.
+- Discuss costs more tokens on the responding machine. Prefer ask when possible.
+
+### How to run discuss
+
+1. Stay on **one** `conversation_id` for the whole thread. Cap: **4 open tickets** per conversation (same as ask).
+2. Pass a short `brief` when the peer needs process instructions (what to check, tone, constraints, what to ignore). Do **not** dump your full chat into `brief` (relay trims to 2000 chars).
+3. Keep `question` as the concrete ask for this turn. `brief` is meta-instructions for the responder agent, not the user question.
+4. Reformulate and continue until you can produce a **FINAL** answer for the human.
+5. Do **not** dump intermediate agent chatter as the user-visible reply. Compact status lines are fine ("discussing…"). Only the FINAL goes to the user.
+6. Responder may still use one counter-question per ticket (`hops: 1`) when needed.
+7. Every discuss turn still needs the waiting protocol below (`check_reply` until settled). Do not hand a mid-thread reply to the human as if the task were done.
+
+TUI Chat also has `/discuss` / `/di` for the same mode. MCP path is `mode: "discuss"`.
 
 ## Waiting for the answer (mandatory)
 
@@ -72,13 +89,24 @@ On `peer_offline`: tell the user once that the question is queued, give `ticket_
 - Save the answer before doing anything else.
 - 24-hour retention. Also `unknown_ticket` if the relay was restarted (in-memory storage).
 
+## Attachments (optional)
+
+Pass small UTF-8 text files via `ask_peer(..., attachments: [{ name, content }, ...])`.
+
+- Basename only: `[A-Za-z0-9._-]`, max 128 chars. No path separators.
+- Max 5 files, 256 KiB each, 512 KiB total.
+- Responder finds them under `inbox/<name>` in its conversation workspace. Do not paste large file bodies into `question`.
+- Asker → responder only. There is no attachment field on answers.
+- Offline peers queue in relay memory, so there is a 4 MiB cap on attachment bytes waiting for one peer. On `too many queued attachment bytes`, wait for that peer to drain its inbox or ask without files.
+- The responder needs a recent doucopy. If a peer answers as if there were no files, its machine is on an older version.
+
 ## Remote actions through plain questions
 
 There is no separate action tool. If the peer owner loosened restrictions (`doucopy settings`), a normal `ask_peer` question can ask the remote agent to edit files or run shell commands. If the owner kept the safe default (workspace-only writes, shell off), the remote harness denies those tools. The answer then typically says the action is blocked, or you see a tool/permission error string inside `error` / `answer`. Treat that as intentional owner policy, not a transport failure.
 
 ## Do not
 
-- Do not paste large files or transcripts into the question. The responder has its own memory sources.
+- Do not paste large files or transcripts into the question. Prefer `attachments` for small UTF-8 text, or let the responder use its own memory sources.
 - Do not chain multiple unrelated questions in one `ask_peer` call — one question per ticket. Use `conversation_id` for related follow-ups.
 - Do not retry `ask_peer` on `pending`. It creates a duplicate ticket. Use `check_reply` instead.
 - Do not ask the user whether to continue polling after `pending`. Just poll.

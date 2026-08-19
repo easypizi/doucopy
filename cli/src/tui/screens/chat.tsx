@@ -24,6 +24,7 @@ import { ConfirmModal } from "../components/ConfirmModal.js";
 import { SelectModal } from "../components/SelectModal.js";
 import { TextPrompt } from "../components/TextPrompt.js";
 import {
+  CHIP_LEGEND,
   DELIVERY_CHIP,
   deliveryFromPhase,
   formatLiveDeliveryChip,
@@ -992,11 +993,12 @@ export function ChatScreen({
           <Text color={theme.dim}>{value}</Text>
         )}
       </Box>
-      <Box marginTop={1} flexShrink={0}>
+      <Box marginTop={1} flexShrink={0} flexDirection="column">
         <Text color={theme.dim}>
           Enter send · /ask · /discuss · /incoming · /local · /wipe · /dialogs · Alt+↑/↓ scroll · ↑/↓ history
           {pending > 0 ? ` · ${pending} in flight` : ""}
         </Text>
+        <Text color={theme.dim}>{CHIP_LEGEND}</Text>
       </Box>
     </Box>
   );

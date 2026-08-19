@@ -5,13 +5,14 @@ import path from "node:path";
 import { stopDaemon, plistDestination } from "./launchd.js";
 import { removeDoucopyMcpEntries } from "./setup.js";
 import { removeGlobalDoucopySkills } from "./skills.js";
-import { windowsCmdPath, windowsTaskXmlPath } from "./windows-task.js";
+import { deleteWindowsDaemon, windowsCmdPath, windowsTaskXmlPath } from "./windows-task.js";
 
 export interface UninstallOptions {
   home?: string;
   purge?: boolean;
   yes?: boolean;
   stopDaemon?: (home: string) => void;
+  deleteWindowsTask?: () => void;
   confirm?: () => Promise<boolean>;
   log?: (line: string) => void;
 }
@@ -41,6 +42,7 @@ export async function runUninstall(opts: UninstallOptions = {}): Promise<void> {
   const yes = Boolean(opts.yes);
   const log = opts.log ?? ((line: string) => console.log(line));
   const stop = opts.stopDaemon ?? ((h: string) => stopDaemon(h));
+  const deleteTask = opts.deleteWindowsTask ?? (() => deleteWindowsDaemon());
 
   if (purge && !yes) {
     const ok = opts.confirm
@@ -58,6 +60,15 @@ export async function runUninstall(opts: UninstallOptions = {}): Promise<void> {
     log("stopped responder daemon (if it was running)");
   } catch (err) {
     log(`stop daemon: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  if (process.platform === "win32" || opts.deleteWindowsTask) {
+    try {
+      deleteTask();
+      log("removed Windows Task Scheduler registration (if present)");
+    } catch (err) {
+      log(`delete Windows task: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   removeSupervisorArtifacts(home, log);

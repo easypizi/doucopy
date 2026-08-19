@@ -2,6 +2,7 @@ import { Box, Text, useInput, useWindowSize } from "ink";
 import { useEffect, useState } from "react";
 import { listInstallCandidates } from "../../harness-install.js";
 import { Panel } from "../components/Panel.js";
+import { CHIP_LEGEND } from "../delivery-chip.js";
 import { theme } from "../theme.js";
 import type { StatusSnapshot } from "../useStatusSnapshot.js";
 
@@ -123,7 +124,7 @@ export function StatusScreen({
                 <Text color={theme.dim}>  ← </Text>
                 <Text>{t.from_peer.padEnd(14)} </Text>
                 <Text color={t.phase === "working" ? theme.warn : theme.dim} bold={t.phase === "working"}>
-                  {t.phase === "working" ? "● answering" : "○ queued"}
+                  {t.phase === "working" ? "●" : "○"}
                 </Text>
                 <Text color={theme.dim}>
                   {" "}
@@ -151,14 +152,14 @@ export function StatusScreen({
                   bold={t.status === "pending" && t.phase === "working"}
                 >
                   {t.status === "pending" && t.phase === "working"
-                    ? "● answering"
+                    ? "●"
                     : t.status === "pending" && t.phase === "queued"
-                      ? "○ queued"
+                      ? "○"
                       : t.status === "answered"
-                        ? "✓ done"
+                        ? "✓"
                         : t.status === "error"
-                          ? "× error"
-                          : t.status}
+                          ? "×"
+                          : "○"}
                 </Text>
                 <Text color={theme.dim}>  {t.ticket_id.slice(0, 8)}</Text>
               </Box>
@@ -188,7 +189,11 @@ export function StatusScreen({
         </Box>
         <Box flexGrow={1}>{dialogsPanel}</Box>
       </Box>
-      <Box marginTop={1} flexShrink={0}>
+      <Box marginTop={1} flexShrink={0} flexDirection="column">
+        <Text color={theme.dim}>
+          Responder runs in the background. You can close this TUI anytime.
+        </Text>
+        <Text color={theme.dim}>{CHIP_LEGEND}</Text>
         <Text color={theme.dim}>c chat · u updates · r refresh · Enter Peers · Tab switch</Text>
       </Box>
     </Box>

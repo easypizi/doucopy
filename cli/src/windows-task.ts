@@ -66,8 +66,20 @@ export function renderWindowsWrapper(nodeBin: string, daemonEntry: string, home:
     pathHome: home,
     platform: "win32",
   });
+  const winHome = path.win32.normalize(home);
+  const driveMatch = /^([A-Za-z]:)/.exec(winHome);
+  const homeDrive = driveMatch?.[1] ?? "C:";
+  const homePath = winHome.slice(homeDrive.length) || "\\";
+  const appData = path.win32.join(winHome, "AppData", "Roaming");
+  const localAppData = path.win32.join(winHome, "AppData", "Local");
   const lines = [
     "@echo off",
+    // Task Scheduler may start with a stripped env. Pin profile dirs to install-time home.
+    `set "USERPROFILE=${winHome}"`,
+    `set "HOMEDRIVE=${homeDrive}"`,
+    `set "HOMEPATH=${homePath}"`,
+    `set "APPDATA=${appData}"`,
+    `set "LOCALAPPDATA=${localAppData}"`,
     `set "PATH=${prefix};%PATH%"`,
     `${cmdQuote(nodeBin)} ${cmdQuote(daemonEntry)} >> ${cmdQuote(logOut)} 2>> ${cmdQuote(logErr)}`,
     "",
@@ -198,6 +210,14 @@ export function installWindowsDaemon(
 }
 
 export function stopWindowsDaemon(run: SchtasksRunner = defaultSchtasks): void {
+  // Disable + End keeps the LogonTrigger registration. Delete would force re-join/setup.
+  // RestartOnFailure would revive the process after /End alone, so disable before ending.
+  run(["/Change", "/TN", WINDOWS_TASK_NAME, "/DISABLE"]);
+  run(["/End", "/TN", WINDOWS_TASK_NAME]);
+}
+
+/** Remove the Task Scheduler registration (uninstall / purge). */
+export function deleteWindowsDaemon(run: SchtasksRunner = defaultSchtasks): void {
   run(["/End", "/TN", WINDOWS_TASK_NAME]);
   run(["/Delete", "/TN", WINDOWS_TASK_NAME, "/F"]);
 }

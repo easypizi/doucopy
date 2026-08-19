@@ -29,6 +29,7 @@ describe("buildDaemonPathDirs", () => {
       path.win32.normalize("C:\\Users\\me\\AppData\\Roaming\\nvm\\v22.17.1").toLowerCase(),
     );
     expect(dirs).toContain("C:\\Users\\me\\AppData\\Roaming\\npm");
+    expect(dirs).toContain("C:\\Users\\me\\AppData\\Local\\cursor-agent");
     expect(dirs.some((d) => d.toLowerCase().includes(".local"))).toBe(true);
   });
 });

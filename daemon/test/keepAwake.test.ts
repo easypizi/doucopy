@@ -233,10 +233,13 @@ describe("Windows keep_awake helpers", () => {
     expect(script).toContain("0x80000041");
   });
 
-  it("stopWindowsScheduledTask ends and deletes the doucopy task", () => {
+  it("stopWindowsScheduledTask disables before ending, without deleting", () => {
     const run = vi.fn().mockReturnValue({ status: 0, stdout: "", stderr: "" });
     stopWindowsScheduledTask(run);
-    expect(run).toHaveBeenCalledWith(["/End", "/TN", WINDOWS_TASK_NAME]);
-    expect(run).toHaveBeenCalledWith(["/Delete", "/TN", WINDOWS_TASK_NAME, "/F"]);
+    // /End kills this process tree, so /DISABLE must land first.
+    expect(run.mock.calls.map((c) => c[0])).toEqual([
+      ["/Change", "/TN", WINDOWS_TASK_NAME, "/DISABLE"],
+      ["/End", "/TN", WINDOWS_TASK_NAME],
+    ]);
   });
 });

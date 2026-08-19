@@ -66,6 +66,29 @@ Read the `error` string. Common values:
 - `"overflow"` — inbox has 100 questions queued for this peer; the daemon isn't keeping up. Restart it.
 - `"expired"` — question sat 24h in the inbox before being picked up.
 
+### Discuss mode surprises
+
+- **Human sees an intermediate discuss reply as the answer.** The asker agent handed back a mid-thread `answered` instead of waiting / continuing until FINAL. Fix on the ask side: keep `mode: "discuss"`, same `conversation_id`, only show the user a FINAL. Compact "discussing…" is fine while polling.
+- **`brief` seems ignored.** Relay trims `brief` to 2000 chars. Empty/whitespace brief is dropped. Confirm the asker passed `brief` on that ticket. Responder sees it as a "Brief from the asking agent" section in `task.md`.
+- **Confused ask vs discuss.** Default `mode` is `ask` (one-shot). `mode: "discuss"` must be set explicitly (MCP) or via TUI `/discuss`. Mixing modes on the same `conversation_id` still works, but the responder only gets discuss instructions when that ticket's mode is discuss.
+- **Too many open tickets.** Discuss threads still share the cap of 4 open tickets per `conversation_id`. Settle or wait before firing more turns.
+
+### Attachment problems
+
+- **`attachment name must be ...` / `content must be a UTF-8 string` / `exceeds ... bytes`** — relay validation on `ask_peer`. Limits: 5 files, 256 KiB each, 512 KiB total, basename of `[A-Za-z0-9._-]` only, no empty files and no binary.
+- **`too many queued attachment bytes`** — that peer is offline and its queued questions already hold ~4 MiB of files in relay memory. Wait for the responder to drain its inbox, or ask without files.
+- **`attachment write failed: ...`** — the responder daemon could not write into `~/.doucopy/workspace/<conversation>/inbox/`. Check disk space and permissions on the workspace directory in `responder.err.log`.
+- **Peer answers as if no files were sent** — its machine runs an older doucopy that ignores `attachments`. Update the package there and `doucopy restart`. Attachments need a new relay *and* a new responder daemon.
+
+### TUI glyphs look wrong on Windows
+
+Empty squares or broken panel borders mean the terminal has no font fallback (the legacy console host with Consolas). Two fixes:
+
+- Run doucopy in Windows Terminal (default on Win11, ships with PowerShell 7).
+- Or force plain ASCII output: `DOUCOPY_ASCII=1 doucopy`. Chips become `* o ! + x` and borders `+ - |`.
+
+Encoding is not the cause here: `chcp` does not affect an interactive TUI, Node writes the console through `WriteConsoleW`.
+
 ## Restart cycle
 
 Most transient issues clear with:

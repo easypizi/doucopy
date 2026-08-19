@@ -251,6 +251,27 @@ describe("createHandler", () => {
     expect(taskMd).toContain("concise");
   });
 
+  it("materializes asker attachments into conversation workspace inbox/", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "doucopy-handler-"));
+    process.env.FAKE_AGENT_MODE = "ok";
+    const config = makeConfig(dir);
+    const store = new ConversationStore(path.join(dir, "conversations.json"));
+    const handler = createHandler(config, store, "test policy");
+    await handler(
+      question({
+        attachments: [{ name: "snippet.ts", content: "const x = 1;\n" }],
+      }),
+    );
+    const inboxFile = path.join(config.responder.workspace_dir, "conv-1", "inbox", "snippet.ts");
+    expect(existsSync(inboxFile)).toBe(true);
+    expect(readFileSync(inboxFile, "utf8")).toBe("const x = 1;\n");
+    const taskMd = readFileSync(
+      path.join(config.responder.workspace_dir, "conv-1", "task.md"),
+      "utf8",
+    );
+    expect(taskMd).toContain("inbox/snippet.ts");
+  });
+
   it("passes claude settings and codex sandbox from restrictions via injected harness opts", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "doucopy-handler-"));
     const seen: HarnessOptions[] = [];

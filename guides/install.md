@@ -81,6 +81,7 @@ npx doucopy join <relay-url> <invite> \
 - An invite code from someone already in the circle.
 - macOS or Windows if this machine should run the responder daemon (`launchd` / Task Scheduler). Asker-only mode works on Linux too.
 - A local coding-agent CLI on every responder machine: `cursor-agent`, `claude` or `codex`.
+- On Windows, run the TUI in Windows Terminal so font fallback works. The legacy console host cannot draw some glyphs and panel borders; there, start with `DOUCOPY_ASCII=1` for plain ASCII output.
 
 If the circle already has a relay, you can stop here and run `npx doucopy join`.
 

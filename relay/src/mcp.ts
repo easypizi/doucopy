@@ -1,6 +1,12 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { ConversationFullError, HopLimitError, MAX_HOPS, type Mailbox } from "./mailbox.js";
+import {
+  AttachmentValidationError,
+  ConversationFullError,
+  HopLimitError,
+  MAX_HOPS,
+  type Mailbox,
+} from "./mailbox.js";
 
 const KEEPALIVE_INTERVAL_MS = 15_000;
 const DEFAULT_TIMEOUT_S = 120;
@@ -103,9 +109,20 @@ export function buildMcpServer(
           .string()
           .optional()
           .describe("Short instructions for the responding agent (discuss/ask). Not shown as the question."),
+        attachments: z
+          .array(
+            z.object({
+              name: z
+                .string()
+                .describe("Basename only: [A-Za-z0-9._-], max 128 chars. Written to responder workspace inbox/."),
+              content: z.string().describe("UTF-8 text file contents (max 256 KiB each, 512 KiB total, max 5 files)."),
+            }),
+          )
+          .optional()
+          .describe("Optional UTF-8 text files for the responder (asker → responder only)."),
       },
     },
-    async ({ peer, question, timeout_seconds, conversation_id, hops, mode, brief }, extra) => {
+    async ({ peer, question, timeout_seconds, conversation_id, hops, mode, brief, attachments }, extra) => {
       if (peer === fromPeer) {
         return json({ status: "error", error: "cannot ask yourself" });
       }
@@ -117,9 +134,14 @@ export function buildMcpServer(
           clientHops: hops ?? 0,
           mode: mode === "discuss" ? "discuss" : "ask",
           brief,
+          attachments,
         }));
       } catch (err) {
-        if (err instanceof HopLimitError || err instanceof ConversationFullError) {
+        if (
+          err instanceof HopLimitError ||
+          err instanceof ConversationFullError ||
+          err instanceof AttachmentValidationError
+        ) {
           return json({ status: "error", error: err.message });
         }
         throw err;

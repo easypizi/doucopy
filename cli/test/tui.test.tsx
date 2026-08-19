@@ -4,6 +4,8 @@ import path from "node:path";
 import React from "react";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it } from "vitest";
+import { asciiFold } from "../src/ascii-output.js";
+import { CHIP_LEGEND } from "../src/tui/delivery-chip.js";
 import { Header, incomingValueColor } from "../src/tui/header.js";
 import { theme } from "../src/tui/theme.js";
 import { App } from "../src/tui/app.js";
@@ -36,6 +38,61 @@ function emptySnap(over: Partial<StatusSnapshot> = {}): StatusSnapshot {
     peerCount: 0,
     ...over,
   };
+}
+
+/** Joined snapshot with one ticket per chip state. ASCII-only payload on purpose. */
+function busySnap(): StatusSnapshot {
+  return emptySnap({
+    joined: true,
+    relayOk: true,
+    relayHost: "r.example.com",
+    daemonRunning: true,
+    config: {
+      self_peer: "Ivan",
+      relay_url: "https://r.example.com",
+      token: "tok",
+      responder: { model: "composer-2.5", harness: "cursor-agent" },
+    },
+    peers: [
+      { name: "Ivan", online: true, self: true },
+      { name: "work", online: true, self: false },
+    ],
+    onlineCount: 2,
+    peerCount: 2,
+    status: {
+      self: "Ivan",
+      self_online: true,
+      peers: [{ name: "work", online: true }],
+      incoming_queued: 2,
+      incoming: [
+        {
+          ticket_id: "in-working-1",
+          from_peer: "work",
+          conversation_id: "conv-1",
+          created_at: 1,
+          phase: "working",
+          mode: "ask",
+          question_preview: "what shipped last week",
+        },
+        {
+          ticket_id: "in-queued-1",
+          from_peer: "work",
+          conversation_id: "conv-2",
+          created_at: 2,
+          phase: "queued",
+          mode: "discuss",
+          question_preview: "lets compare two options",
+        },
+      ],
+      outgoing: [
+        { ticket_id: "out-working-1", to_peer: "work", status: "pending", phase: "working", created_at: 3 },
+        { ticket_id: "out-queued-1", to_peer: "work", status: "pending", phase: "queued", created_at: 4 },
+        { ticket_id: "out-done-1", to_peer: "work", status: "answered", created_at: 5 },
+        { ticket_id: "out-error-1", to_peer: "work", status: "error", created_at: 6 },
+        { ticket_id: "out-odd-1", to_peer: "work", status: "pending", created_at: 7 },
+      ],
+    },
+  });
 }
 
 function writeConfigHome(): string {
@@ -120,6 +177,36 @@ describe("TUI chrome", () => {
     );
     cleanups.push(unmount);
     expect(lastFrame()).toContain("No config yet");
+  });
+
+  it("status renders glyph chips with a legend and folds fully to ASCII", () => {
+    const { lastFrame, unmount } = render(
+      <StatusScreen
+        snap={busySnap()}
+        onRefresh={() => undefined}
+        onOpenPeers={() => undefined}
+        inputActive={false}
+      />,
+    );
+    cleanups.push(unmount);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("You can close this TUI anytime");
+    expect(frame).toContain(CHIP_LEGEND);
+    // Ticket rows are glyph-only: one chip per state, no status words.
+    const row = (needle: string) => frame.split("\n").find((line) => line.includes(needle)) ?? "";
+    expect(row("what shipped")).toMatch(/●/);
+    expect(row("lets compare")).toMatch(/○/);
+    expect(row("out-work")).toMatch(/●/);
+    expect(row("out-queu")).toMatch(/○/);
+    expect(row("out-done")).toMatch(/✓/);
+    expect(row("out-erro")).toMatch(/×/);
+    expect(row("out-done")).not.toMatch(/answered/);
+    expect(row("out-erro")).not.toMatch(/error/);
+    // Pending without a phase used to leak the raw word.
+    expect(row("out-odd-")).toMatch(/○/);
+    expect(row("out-odd-")).not.toMatch(/pending/);
+    // Every glyph the screen emits must be covered by the ASCII fold table.
+    expect(asciiFold(frame)).not.toMatch(/[^\x00-\x7F]/);
   });
 
   it("wizard frame shows step progress", () => {
@@ -260,7 +347,9 @@ describe("Chat pending poll", () => {
     await new Promise((r) => setTimeout(r, 600));
     const frame = lastFrame() ?? "";
     expect(frame).toContain("PONG-from-work");
-    expect(frame).toMatch(/✓ done/);
+    expect(frame).toMatch(/✓/);
+    expect(frame).toContain(CHIP_LEGEND);
+    expect(asciiFold(frame)).not.toMatch(/[^\x00-\x7F]/);
     expect(polls).toBeGreaterThanOrEqual(3);
   });
 
@@ -302,9 +391,14 @@ describe("Chat pending poll", () => {
     );
     cleanups.push(unmount);
     await new Promise((r) => setTimeout(r, 200));
-    expect(lastFrame() ?? "").toMatch(/[●◐○◑] answering/);
+    // Scope the assertion to the ask row so peer-list glyphs cannot satisfy it.
+    const askRow = (frame: string) => frame.split("\n").find((line) => line.includes("slow question")) ?? "";
+    expect(askRow(lastFrame() ?? "")).toMatch(/[●◐○◑]/);
     await new Promise((r) => setTimeout(r, 1100));
-    expect(lastFrame() ?? "").toMatch(/[●◐○◑] answering \d+s/);
+    const liveRow = askRow(lastFrame() ?? "");
+    expect(liveRow).toMatch(/[●◐○◑] \d+s/);
+    // Live chip is glyph plus elapsed only, no word labels.
+    expect(liveRow).not.toMatch(/answering|queued|sending/);
     resolveReply?.({ status: "answered", ticket_id: "ticket-slow-1", answer: "ok" });
     await new Promise((r) => setTimeout(r, 200));
   });

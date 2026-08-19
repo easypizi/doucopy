@@ -26,6 +26,7 @@ export async function runStatus(): Promise<void> {
   console.log(`  relay:  ${config.relay_url}`);
   console.log(`  self:   ${config.self_peer}`);
   console.log(`  daemon: ${isDaemonRunning() ? c.green("running") : c.dim("stopped")}`);
+  console.log(c.dim("  tip:    responder runs in the background; you can close the TUI anytime"));
   const paused = listPaused();
   try {
     const status = await fetchStatus(config.relay_url, config.token);
